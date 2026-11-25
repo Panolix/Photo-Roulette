@@ -1,0 +1,13 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=Photo Roulette
+GenericName=Photo and video roulette
+Comment=Deal the evidence. One photo or video at a time.
+Exec=photo-roulette %f
+Icon=photo-roulette
+Terminal=false
+Categories=Graphics;Photography;Viewer;
+MimeType=image/jpeg;image/png;image/webp;image/gif;image/bmp;image/tiff;video/mp4;video/quicktime;video/x-msvideo;video/x-matroska;video/webm;video/x-ms-wmv;
+Keywords=photo;video;slideshow;roulette;party;cringe;
+StartupWMClass=photo-roulette

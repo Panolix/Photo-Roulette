@@ -1,0 +1,26 @@
+[package]
+name = "photo-roulette"
+version = "0.2.0"
+edition = "2024"
+description = "A tiny photo and video roulette for group cringe sessions."
+authors = ["Panagiotis Smponias"]
+license = "CC-BY-NC-SA-4.0"
+repository = "https://github.com/Panolix/Photo-Roulette"
+homepage = "https://github.com/Panolix/Photo-Roulette"
+readme = "README.md"
+keywords = ["photo", "video", "egui", "roulette", "party"]
+categories = ["graphics", "multimedia", "gui"]
+
+[dependencies]
+eframe = "0.31"
+image = "0.25"
+rand = "0.9"
+rfd = "0.15"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6"
+objc2-avf-audio = "0.3"
+objc2-foundation = "0.3"
+
+[profile.release]
+strip = true
