@@ -201,7 +201,8 @@ cargo audit
 The test suite covers the shuffle bag, folder scanning and cancellation,
 settings/history, and a generated-video pipeline test (skipped automatically if
 ffmpeg is not installed). CI also launches the real GUI with `--smoke-test`,
-loads an image, renders it, and exits cleanly on macOS, Windows, and Linux.
+loads an image, renders it, and exits cleanly on macOS and Linux (Windows CI
+runners only expose OpenGL 1.1, so Windows GUI validation needs a real desktop).
 Package-content and CLI checks run alongside those tests.
 
 ## Known limitations

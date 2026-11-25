@@ -6,7 +6,6 @@ description = "A tiny photo and video roulette for group cringe sessions."
 authors = ["Panagiotis Smponias"]
 license = "CC-BY-NC-SA-4.0"
 repository = "https://github.com/Panolix/Photo-Roulette"
-homepage = "https://github.com/Panolix/Photo-Roulette"
 readme = "README.md"
 keywords = ["photo", "video", "egui", "roulette", "party"]
 categories = ["graphics", "multimedia", "gui"]

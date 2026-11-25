@@ -38,6 +38,9 @@ jobs:
             libegl1-mesa-dev \
             libgl1-mesa-dev \
             libgl1-mesa-dri \
+            libglx-mesa0 \
+            libxkbcommon-x11-0 \
+            libxcb-xkb1 \
             libasound2-dev \
             ffmpeg \
             xvfb
@@ -95,12 +98,9 @@ jobs:
           ./target/debug/photo-roulette --smoke-test
           ./target/debug/photo-roulette --smoke-test smoke-media
 
-      - name: GUI smoke test (Windows)
-        if: matrix.os == 'windows-latest'
-        shell: bash
-        run: |
-          ./target/debug/photo-roulette.exe --smoke-test
-          ./target/debug/photo-roulette.exe --smoke-test smoke-media
+      # The GitHub Windows runner only exposes an OpenGL 1.1 context, which
+      # egui_glow cannot use. Windows still runs the unit/video tests and the
+      # CLI smoke test above; GUI validation needs a real desktop session.
 
   security:
     name: Dependency audit
