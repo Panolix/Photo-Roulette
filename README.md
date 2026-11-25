@@ -118,18 +118,18 @@ speed.
 ./packaging/macos/make-dmg.sh
 
 # Windows installer (run on Windows with Inno Setup installed)
-iscc packaging/windows/PhotoRoulette.iss /DMyAppVersion=0.2.0
+iscc packaging/windows/PhotoRoulette.iss /DMyAppVersion=0.3.0
 
 # Linux .deb and portable tarball (run on Linux)
-VERSION=0.2.0 ./packaging/linux/build-packages.sh
+VERSION=0.3.0 ./packaging/linux/build-packages.sh
 ```
 
 GitHub Actions builds the macOS DMG, Windows installer, Linux `.deb`, and Linux
 tarball for each tagged release. Tag a release with:
 
 ```sh
-git tag v0.2.0
-git push origin v0.2.0
+git tag v0.3.0
+git push origin v0.3.0
 ```
 
 The workflows live in `.github/workflows/ci.yml` and `.github/workflows/release.yml`.
