@@ -69,8 +69,9 @@ affiliation with the original author.
   its license text is in `assets/icons/`.
 - **ffmpeg** is not distributed with this project. When installed separately,
   it remains under its own license (the Homebrew build is GPL-licensed).
-- **rodio** and its audio backends are distributed under MIT/Apache-2.0
-  licenses; see `Cargo.lock` for the exact versions.
+- **rodio** and **cpal** are distributed under MIT/Apache-2.0 licenses, and
+  the **Symphonia** audio decoders are distributed under MPL-2.0; see
+  `Cargo.lock` for the exact versions.
 - Other Rust dependencies retain their respective licenses; run
   `cargo license` or inspect `Cargo.lock` for the dependency set.
 
