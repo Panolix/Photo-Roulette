@@ -140,7 +140,10 @@ jobs:
 
       - name: Smoke test Windows binary
         if: matrix.name == 'Windows'
-        run: .\target\release\photo-roulette.exe --version
+        shell: pwsh
+        run: |
+          $process = Start-Process -FilePath ".\target\release\photo-roulette.exe" -ArgumentList "--version" -Wait -PassThru
+          if ($process.ExitCode -ne 0) { throw "photo-roulette --version exited with $($process.ExitCode)" }
 
       - name: Fetch LGPL ffmpeg (Windows)
         if: matrix.name == 'Windows'

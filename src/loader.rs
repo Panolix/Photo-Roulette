@@ -319,7 +319,7 @@ fn finish_image(image: DynamicImage) -> Result<LoadedPhoto, String> {
 
 #[cfg(not(target_os = "macos"))]
 fn decode_with_ffmpeg(path: &Path) -> Result<LoadedPhoto, String> {
-    use std::process::{Command, Stdio};
+    use std::process::Stdio;
 
     let Some(ffmpeg) = crate::video::find_ffmpeg() else {
         return Err(
@@ -328,7 +328,7 @@ fn decode_with_ffmpeg(path: &Path) -> Result<LoadedPhoto, String> {
         );
     };
 
-    let output = Command::new(ffmpeg)
+    let output = crate::video::ffmpeg_command(&ffmpeg)
         .args(["-v", "error", "-nostdin", "-i"])
         .arg(path)
         .args(["-frames:v", "1", "-f", "image2pipe", "-vcodec", "png", "-"])

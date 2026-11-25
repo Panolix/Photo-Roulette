@@ -1,3 +1,5 @@
+#![cfg_attr(all(not(debug_assertions), not(test)), windows_subsystem = "windows")]
+
 mod deck;
 mod history;
 mod loader;

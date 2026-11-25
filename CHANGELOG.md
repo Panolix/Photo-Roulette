@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.1.1 - 2026-11-25
+
+- Windows release builds are now GUI-subsystem binaries, so launching the app no longer opens a terminal window.
+- Bundled ffmpeg/ffprobe helpers run without opening their own console windows.
+- The Windows release smoke test now waits for the GUI binary and checks its exit code.
+
 ## 1.1.0 — 2026-11-25
 
 - Release packages now bundle LGPL FFmpeg, so videos work without a separate install.

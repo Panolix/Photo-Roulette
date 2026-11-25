@@ -1,7 +1,7 @@
 # Photo Roulette
 
 <p align="center">
-  <img src="assets/PhotoRoulette-256.png?v=1.1.0" width="128" alt="Photo Roulette icon">
+  <img src="assets/PhotoRoulette-256.png?v=1.1.1" width="128" alt="Photo Roulette icon">
 </p>
 
 [![Platform](https://img.shields.io/badge/Platform-macOS%20%7C%20Windows%20%7C%20Linux-blue)](https://github.com/Panolix/Photo-Roulette/releases)
@@ -143,10 +143,10 @@ speed.
 ./packaging/macos/make-dmg.sh
 
 # Windows installer (run on Windows with Inno Setup installed)
-iscc packaging/windows/PhotoRoulette.iss /DMyAppVersion=1.1.0
+iscc packaging/windows/PhotoRoulette.iss /DMyAppVersion=1.1.1
 
 # Linux .deb and portable tarball (run on Linux)
-VERSION=1.1.0 ./packaging/linux/build-packages.sh
+VERSION=1.1.1 ./packaging/linux/build-packages.sh
 ```
 
 GitHub Actions builds the macOS DMG, Windows installer, Linux `.deb`, and Linux
@@ -154,8 +154,8 @@ tarball for each tagged release, and publishes a `SHA256SUMS` file. Tag a
 release with:
 
 ```sh
-git tag v1.1.0
-git push origin v1.1.0
+git tag v1.1.1
+git push origin v1.1.1
 ```
 
 The workflows live in `.github/workflows/ci.yml` and `.github/workflows/release.yml`.

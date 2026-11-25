@@ -476,10 +476,11 @@ fn ffmpeg() -> Option<PathBuf> {
 
 /// Spawn an ffmpeg/ffprobe binary, pointing the Linux loader at bundled
 /// shared libraries when the build uses them.
-fn ffmpeg_command(binary: &Path) -> Command {
+pub(crate) fn ffmpeg_command(binary: &Path) -> Command {
+    let mut command = Command::new(binary);
+
     #[cfg(target_os = "linux")]
     {
-        let mut command = Command::new(binary);
         if let Some(directory) = binary.parent() {
             let mut paths = vec![directory.to_path_buf(), directory.join("lib")];
             if let Some(existing) = std::env::var_os("LD_LIBRARY_PATH") {
@@ -489,12 +490,23 @@ fn ffmpeg_command(binary: &Path) -> Command {
                 command.env("LD_LIBRARY_PATH", value);
             }
         }
-        command
     }
 
-    #[cfg(not(target_os = "linux"))]
+    hide_console(&mut command);
+    command
+}
+
+/// Keep console-subsystem helpers such as ffmpeg from opening a terminal
+/// window next to the GUI app on Windows.
+fn hide_console(command: &mut Command) {
+    #[cfg(not(windows))]
+    let _ = command;
+
+    #[cfg(windows)]
     {
-        Command::new(binary)
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        command.creation_flags(CREATE_NO_WINDOW);
     }
 }
 

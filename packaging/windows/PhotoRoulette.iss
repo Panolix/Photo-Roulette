@@ -1,6 +1,6 @@
 #define MyAppName "Photo Roulette"
 #ifndef MyAppVersion
-  #define MyAppVersion "1.1.0"
+  #define MyAppVersion "1.1.1"
 #endif
 #define MyAppPublisher "Panagiotis Smponias"
 #define MyAppURL "https://github.com/Panolix/Photo-Roulette"
