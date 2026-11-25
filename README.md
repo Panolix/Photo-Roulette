@@ -1,7 +1,7 @@
 # Photo Roulette
 
 <p align="center">
-  <img src="assets/PhotoRoulette-256.png" width="128" alt="Photo Roulette icon">
+  <img src="assets/PhotoRoulette-256.png?v=0.3.0" width="128" alt="Photo Roulette icon">
 </p>
 
 [![Platform](https://img.shields.io/badge/Platform-macOS%20%7C%20Windows%20%7C%20Linux-blue)](https://github.com/Panolix/Photo-Roulette/releases)
