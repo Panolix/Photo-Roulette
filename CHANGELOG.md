@@ -9,6 +9,7 @@
 - The app finds bundled FFmpeg next to the executable, in a `ffmpeg/` subfolder, or in `/usr/lib/photo-roulette/` on Linux; external FFmpeg is still supported for source builds.
 - Release verification runs the bundled `ffmpeg`/`ffprobe` on each platform and checks the installed Windows package.
 - Removed folder-name clutter from the window title and deal counter, and simplified the empty state by dropping the deck illustration.
+- Replaced the decorative shuffle wheel with a clean loading spinner.
 
 ## 1.0.0 — 2026-11-25
 

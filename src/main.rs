@@ -1420,7 +1420,7 @@ impl PhotoRoulette {
                     let elapsed = scan.started.elapsed().as_secs_f32();
                     draw_scanning(&painter, card, found, elapsed, time);
                     let cancel_rect = egui::Rect::from_center_size(
-                        pos2(card.center().x, card.center().y + 228.0),
+                        pos2(card.center().x, card.center().y + 94.0),
                         vec2(150.0, 38.0),
                     );
                     let cancel = ui.put(
@@ -2288,19 +2288,18 @@ fn draw_empty(painter: &egui::Painter, card: egui::Rect, count: usize, round: Op
 }
 
 fn draw_scanning(painter: &egui::Painter, card: egui::Rect, found: usize, elapsed: f32, time: f32) {
-    let center = card.center() - vec2(0.0, 16.0);
-    draw_shuffle_wheel(painter, center, 140.0, time);
+    draw_spinner(painter, card.center() - vec2(0.0, 32.0), time);
 
     let dots = ".".repeat(1 + (time * 2.5) as usize % 3);
     painter.text(
-        pos2(card.center().x, card.center().y + 166.0),
+        pos2(card.center().x, card.center().y + 22.0),
         Align2::CENTER_CENTER,
         format!("SCANNING THE EVIDENCE{dots}"),
         theme::bold_font(11.0),
         ACCENT,
     );
     painter.text(
-        pos2(card.center().x, card.center().y + 188.0),
+        pos2(card.center().x, card.center().y + 44.0),
         Align2::CENTER_CENTER,
         if found == 0 {
             format!("Looking through subfolders… {:.0}s", elapsed)
@@ -2317,8 +2316,7 @@ fn draw_scanning(painter: &egui::Painter, card: egui::Rect, found: usize, elapse
 }
 
 fn draw_loading(painter: &egui::Painter, card: egui::Rect, time: f32, is_video: bool) {
-    let center = card.center() - vec2(0.0, 16.0);
-    draw_shuffle_wheel(painter, center, 140.0, time);
+    draw_spinner(painter, card.center() - vec2(0.0, 32.0), time);
 
     let dots = ".".repeat(1 + (time * 2.5) as usize % 3);
     let label = if is_video {
@@ -2333,14 +2331,14 @@ fn draw_loading(painter: &egui::Painter, card: egui::Rect, time: f32, is_video: 
     };
 
     painter.text(
-        pos2(card.center().x, card.center().y + 166.0),
+        pos2(card.center().x, card.center().y + 22.0),
         Align2::CENTER_CENTER,
         label,
         theme::bold_font(11.0),
         ACCENT,
     );
     painter.text(
-        pos2(card.center().x, card.center().y + 188.0),
+        pos2(card.center().x, card.center().y + 44.0),
         Align2::CENTER_CENTER,
         sublabel,
         theme::body_font(11.0),
@@ -2348,45 +2346,37 @@ fn draw_loading(painter: &egui::Painter, card: egui::Rect, time: f32, is_video: 
     );
 }
 
-fn draw_shuffle_wheel(painter: &egui::Painter, center: egui::Pos2, radius: f32, time: f32) {
+fn draw_spinner(painter: &egui::Painter, center: egui::Pos2, time: f32) {
+    let radius = 30.0;
     painter.circle_stroke(
         center,
         radius,
-        Stroke::new(1.0_f32, Color32::from_white_alpha(18)),
+        Stroke::new(3.0_f32, Color32::from_white_alpha(18)),
     );
 
-    for i in 0..36 {
-        let angle = i as f32 / 36.0 * TAU - time * 0.1;
-        let length = if i % 3 == 0 { 9.0 } else { 4.0 };
-        let p0 = center + vec2(angle.cos(), angle.sin()) * (radius - 1.0);
-        let p1 = center + vec2(angle.cos(), angle.sin()) * (radius + length);
+    let start = time * 2.4;
+    let sweep = TAU * 0.82;
+    let segments = 48;
+    for index in 0..segments {
+        let t0 = index as f32 / segments as f32;
+        let t1 = (index + 1) as f32 / segments as f32;
+        let angle0 = start + sweep * t0;
+        let angle1 = start + sweep * t1;
+        let alpha = ((t1.powf(2.2)) * 235.0) as u8;
         painter.line_segment(
-            [p0, p1],
+            [
+                center + vec2(angle0.cos(), angle0.sin()) * radius,
+                center + vec2(angle1.cos(), angle1.sin()) * radius,
+            ],
             Stroke::new(
-                1.0_f32,
-                Color32::from_white_alpha(if i % 3 == 0 { 34 } else { 18 }),
-            ),
-        );
-    }
-
-    let head = (time * 1.8) % TAU;
-    for i in 0..16 {
-        let t = i as f32 / 15.0;
-        let angle = head - t * 0.8;
-        let alpha = ((1.0 - t).powi(3) * 240.0) as u8;
-        let p0 = center + vec2(angle.cos(), angle.sin()) * (radius - 13.0);
-        let p1 = center + vec2((angle + 0.055).cos(), (angle + 0.055).sin()) * (radius + 4.0);
-        painter.line_segment(
-            [p0, p1],
-            Stroke::new(
-                2.5_f32,
+                3.0_f32,
                 Color32::from_rgba_unmultiplied(ACCENT.r(), ACCENT.g(), ACCENT.b(), alpha),
             ),
         );
     }
 
-    let head_pos = center + vec2(head.cos(), head.sin()) * radius;
-    painter.circle_filled(head_pos, 3.2, ACCENT);
+    let head = start + sweep;
+    painter.circle_filled(center + vec2(head.cos(), head.sin()) * radius, 2.2, ACCENT);
 }
 
 fn fade_color(color: Color32, fade: f32) -> Color32 {
