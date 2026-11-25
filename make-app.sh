@@ -22,7 +22,7 @@ else
 fi
 
 rm -rf "$APP"
-mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
+mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources/licenses"
 
 cp target/release/photo-roulette "$APP/Contents/MacOS/photo-roulette"
 cp assets/PhotoRoulette.icns "$APP/Contents/Resources/PhotoRoulette.icns"
@@ -38,8 +38,10 @@ if [ -n "${FFMPEG_BIN_DIR:-}" ]; then
     if [ -f "$FFMPEG_BIN_DIR/LICENSE" ]; then
         cp "$FFMPEG_BIN_DIR/LICENSE" "$APP/Contents/Resources/licenses/FFMPEG-LICENSE.txt"
     fi
+    if [ -f "$FFMPEG_BIN_DIR/SOURCE.txt" ]; then
+        cp "$FFMPEG_BIN_DIR/SOURCE.txt" "$APP/Contents/Resources/licenses/FFMPEG-SOURCE.txt"
+    fi
 fi
-mkdir -p "$APP/Contents/Resources/licenses"
 cp assets/fonts/OFL-ArchivoBlack.txt "$APP/Contents/Resources/licenses/"
 cp assets/fonts/OFL-SpaceGrotesk.txt "$APP/Contents/Resources/licenses/"
 cp assets/icons/LICENSE-bootstrap-icons.txt "$APP/Contents/Resources/licenses/"

@@ -11,7 +11,6 @@ pub const CARD: Color32 = Color32::from_rgb(18, 18, 24);
 pub const CARD_BACK: Color32 = Color32::from_rgb(23, 23, 31);
 pub const PANEL_HOVER: Color32 = Color32::from_rgb(32, 32, 42);
 pub const BORDER: Color32 = Color32::from_rgb(41, 41, 53);
-pub const BORDER_SOFT: Color32 = Color32::from_rgb(31, 31, 41);
 pub const TEXT: Color32 = Color32::from_rgb(246, 243, 237);
 pub const MUTED: Color32 = Color32::from_rgb(151, 148, 161);
 pub const MUTED_DIM: Color32 = Color32::from_rgb(102, 100, 113);

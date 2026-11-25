@@ -278,7 +278,6 @@ struct SmokeTest {
 
 struct PhotoRoulette {
     library: Vec<PathBuf>,
-    folder_label: Option<String>,
     round: Option<Round>,
     current: Option<CurrentPhoto>,
     current_video: Option<CurrentVideo>,
@@ -356,7 +355,6 @@ impl PhotoRoulette {
         let (tx, rx) = channel();
         let mut app = Self {
             library: Vec::new(),
-            folder_label: None,
             round: None,
             current: None,
             current_video: None,
@@ -507,7 +505,6 @@ impl PhotoRoulette {
         self.round = None;
         self.history.clear();
         self.library = media;
-        self.folder_label = Some(library.label.clone());
         self.start_round();
 
         let images = self
@@ -552,10 +549,6 @@ impl PhotoRoulette {
             self.settings.save();
         }
 
-        ctx.send_viewport_cmd(egui::ViewportCommand::Title(format!(
-            "Photo Roulette — {}",
-            library.label
-        )));
         ctx.request_repaint();
     }
 
@@ -695,7 +688,6 @@ impl PhotoRoulette {
 
         if self.library.is_empty() {
             self.round = None;
-            self.folder_label = None;
             self.history.clear();
             self.notify(
                 ctx,
@@ -1274,15 +1266,6 @@ impl PhotoRoulette {
                             .color(TEXT)
                             .extra_letter_spacing(0.7),
                     );
-
-                    if let Some(folder) = &self.folder_label {
-                        ui.add_space(4.0);
-                        ui.label(
-                            RichText::new(format!("· {}", theme::truncate_middle(folder, 26)))
-                                .font(theme::body_font(11.0))
-                                .color(MUTED),
-                        );
-                    }
                 }
                 None => {
                     ui.label(
@@ -1503,13 +1486,7 @@ impl PhotoRoulette {
                         ctx,
                     );
                 } else {
-                    draw_empty(
-                        &painter,
-                        card,
-                        self.library.len(),
-                        self.folder_label.as_deref(),
-                        self.round.as_ref(),
-                    );
+                    draw_empty(&painter, card, self.library.len(), self.round.as_ref());
                 }
 
                 self.draw_notice(&painter, card, ctx);
@@ -2240,26 +2217,10 @@ fn format_duration(seconds: f64) -> String {
     }
 }
 
-fn draw_empty(
-    painter: &egui::Painter,
-    card: egui::Rect,
-    count: usize,
-    folder: Option<&str>,
-    round: Option<&Round>,
-) {
+fn draw_empty(painter: &egui::Painter, card: egui::Rect, count: usize, round: Option<&Round>) {
     let has_media = count > 0;
     let complete = round.is_some_and(Round::is_complete);
-
-    let group_top = card.center().y - 150.0;
-    let stack_center = pos2(card.center().x, group_top + 82.0);
-
-    stack_cards(
-        painter,
-        stack_center,
-        Color32::from_rgb(29, 29, 39),
-        Color32::from_rgba_unmultiplied(ACCENT.r(), ACCENT.g(), ACCENT.b(), 90),
-    );
-    draw_photo_icon(painter, stack_center, ACCENT);
+    let center_x = card.center().x;
 
     let (title, subtitle, pill, pill_color) = if !has_media {
         (
@@ -2283,8 +2244,8 @@ fn draw_empty(
         (
             "THE DECK IS READY".to_owned(),
             format!(
-                "{count} items from {}.\nHit the button below when everyone is ready.",
-                theme::truncate_middle(folder.unwrap_or("your folder"), 36)
+                "{count} {} ready to deal.\nHit the button below when everyone is ready.",
+                if count == 1 { "item" } else { "items" }
             ),
             format!("ROUND {number} · {total} ITEMS"),
             ACCENT,
@@ -2292,14 +2253,14 @@ fn draw_empty(
     };
 
     painter.text(
-        pos2(card.center().x, group_top + 218.0),
+        pos2(center_x, card.center().y - 46.0),
         Align2::CENTER_CENTER,
         title,
         theme::display_font(28.0),
         TEXT,
     );
     painter.text(
-        pos2(card.center().x, group_top + 258.0),
+        pos2(center_x, card.center().y + 2.0),
         Align2::CENTER_CENTER,
         subtitle,
         theme::body_font(13.0),
@@ -2310,7 +2271,7 @@ fn draw_empty(
     let text = pill.to_uppercase();
     let galley = painter.layout_no_wrap(text, font, pill_color);
     let pill_rect = egui::Rect::from_center_size(
-        pos2(card.center().x, group_top + 300.0),
+        pos2(center_x, card.center().y + 54.0),
         galley.size() + vec2(20.0, 10.0),
     );
     painter.rect(
@@ -2329,22 +2290,6 @@ fn draw_empty(
 fn draw_scanning(painter: &egui::Painter, card: egui::Rect, found: usize, elapsed: f32, time: f32) {
     let center = card.center() - vec2(0.0, 16.0);
     draw_shuffle_wheel(painter, center, 140.0, time);
-
-    let bob = (time * 2.2).sin() * 3.0;
-    let stack_center = center + vec2(0.0, bob);
-    stack_cards(
-        painter,
-        stack_center,
-        Color32::from_rgb(30, 30, 41),
-        Color32::from_rgba_unmultiplied(ACCENT.r(), ACCENT.g(), ACCENT.b(), 110),
-    );
-    painter.text(
-        stack_center,
-        Align2::CENTER_CENTER,
-        "?",
-        theme::display_font(62.0),
-        ACCENT,
-    );
 
     let dots = ".".repeat(1 + (time * 2.5) as usize % 3);
     painter.text(
@@ -2374,22 +2319,6 @@ fn draw_scanning(painter: &egui::Painter, card: egui::Rect, found: usize, elapse
 fn draw_loading(painter: &egui::Painter, card: egui::Rect, time: f32, is_video: bool) {
     let center = card.center() - vec2(0.0, 16.0);
     draw_shuffle_wheel(painter, center, 140.0, time);
-
-    let bob = (time * 2.2).sin() * 3.0;
-    let stack_center = center + vec2(0.0, bob);
-    stack_cards(
-        painter,
-        stack_center,
-        Color32::from_rgb(30, 30, 41),
-        Color32::from_rgba_unmultiplied(ACCENT.r(), ACCENT.g(), ACCENT.b(), 110),
-    );
-    painter.text(
-        stack_center,
-        Align2::CENTER_CENTER,
-        "?",
-        theme::display_font(62.0),
-        ACCENT,
-    );
 
     let dots = ".".repeat(1 + (time * 2.5) as usize % 3);
     let label = if is_video {
@@ -2458,77 +2387,6 @@ fn draw_shuffle_wheel(painter: &egui::Painter, center: egui::Pos2, radius: f32, 
 
     let head_pos = center + vec2(head.cos(), head.sin()) * radius;
     painter.circle_filled(head_pos, 3.2, ACCENT);
-}
-
-fn stack_cards(
-    painter: &egui::Painter,
-    center: egui::Pos2,
-    front_fill: Color32,
-    front_border: Color32,
-) {
-    let back = egui::Rect::from_center_size(center + vec2(-38.0, 18.0), vec2(204.0, 146.0));
-    painter.rect(
-        back,
-        CornerRadius::same(14),
-        Color32::from_rgb(16, 16, 22),
-        Stroke::new(1.0_f32, theme::BORDER_SOFT),
-        StrokeKind::Inside,
-    );
-
-    let middle = egui::Rect::from_center_size(center + vec2(34.0, 9.0), vec2(208.0, 150.0));
-    painter.rect(
-        middle,
-        CornerRadius::same(15),
-        CARD_BACK,
-        Stroke::new(1.0_f32, BORDER),
-        StrokeKind::Inside,
-    );
-
-    let front = egui::Rect::from_center_size(center, vec2(218.0, 164.0));
-    painter.rect(
-        front,
-        CornerRadius::same(16),
-        front_fill,
-        Stroke::new(1.0_f32, front_border),
-        StrokeKind::Inside,
-    );
-}
-
-fn draw_photo_icon(painter: &egui::Painter, center: egui::Pos2, color: Color32) {
-    let rect = egui::Rect::from_center_size(center, vec2(64.0, 48.0));
-    painter.rect(
-        rect,
-        CornerRadius::same(6),
-        Color32::from_rgb(14, 14, 20),
-        Stroke::new(1.6_f32, color),
-        StrokeKind::Inside,
-    );
-
-    let mountain = |points: [egui::Pos2; 3], alpha: u8| {
-        painter.add(egui::Shape::convex_polygon(
-            points.to_vec(),
-            Color32::from_rgba_unmultiplied(color.r(), color.g(), color.b(), alpha),
-            Stroke::NONE,
-        ));
-    };
-
-    mountain(
-        [
-            pos2(rect.left() + 7.0, rect.bottom() - 8.0),
-            pos2(rect.left() + 25.0, rect.top() + 19.0),
-            pos2(rect.left() + 43.0, rect.bottom() - 8.0),
-        ],
-        120,
-    );
-    mountain(
-        [
-            pos2(rect.left() + 27.0, rect.bottom() - 8.0),
-            pos2(rect.left() + 42.0, rect.top() + 23.0),
-            pos2(rect.right() - 7.0, rect.bottom() - 8.0),
-        ],
-        75,
-    );
-    painter.circle_filled(pos2(rect.right() - 13.0, rect.top() + 13.0), 3.8, color);
 }
 
 fn fade_color(color: Color32, fade: f32) -> Color32 {

@@ -36,7 +36,6 @@ pub struct LoadedPhoto {
 #[derive(Debug)]
 pub struct MediaLibrary {
     pub media: Vec<PathBuf>,
-    pub label: String,
     pub skipped: usize,
     pub skipped_transcoded: usize,
 }
@@ -73,7 +72,6 @@ pub fn collect_media_interruptible(
     let mut found = Vec::new();
     let mut skipped = 0usize;
     let mut skipped_transcoded = 0usize;
-    let mut label = None;
     let mut root_exists = false;
 
     for root in roots {
@@ -85,9 +83,6 @@ pub fn collect_media_interruptible(
         }
 
         if root.is_dir() {
-            if label.is_none() {
-                label = folder_label(root);
-            }
             walk(
                 root,
                 0,
@@ -98,9 +93,6 @@ pub fn collect_media_interruptible(
                 progress,
             );
         } else if root.is_file() && is_media_file(root) {
-            if label.is_none() {
-                label = root.parent().and_then(folder_label);
-            }
             if is_readable_media(root) {
                 found.push(root.clone());
                 progress.store(found.len(), Ordering::Relaxed);
@@ -144,7 +136,6 @@ pub fn collect_media_interruptible(
 
     Ok(MediaLibrary {
         media,
-        label: label.unwrap_or_else(|| "Your photos".to_owned()),
         skipped,
         skipped_transcoded,
     })
@@ -201,13 +192,6 @@ fn needs_transcode(path: &Path) -> bool {
                 || extension.eq_ignore_ascii_case("heif")
                 || extension.eq_ignore_ascii_case("avif")
         })
-}
-
-fn folder_label(path: &Path) -> Option<String> {
-    path.file_name()
-        .and_then(|name| name.to_str())
-        .filter(|name| !name.is_empty())
-        .map(ToOwned::to_owned)
 }
 
 fn walk(

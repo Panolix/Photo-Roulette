@@ -67,8 +67,13 @@ affiliation with the original author.
   Open Font License. Their license texts are in `assets/fonts/`.
 - The **Bootstrap Icons** restart glyph is distributed under the MIT License;
   its license text is in `assets/icons/`.
-- **ffmpeg** is not distributed with this project. When installed separately,
-  it remains under its own license (the Homebrew build is GPL-licensed).
+- **FFmpeg** is bundled in release packages as an LGPL build: macOS is built
+  from FFmpeg source with `--disable-gpl --disable-nonfree`; Windows and Linux
+  use pinned [BtbN FFmpeg-Builds](https://github.com/BtbN/FFmpeg-Builds)
+  artifacts. Each package includes its license and `SOURCE.txt`; FFmpeg source
+  is available at <https://ffmpeg.org/download.html>. The bundled binaries are
+  unmodified. Do not replace them with GPL builds for redistribution without
+  meeting the GPL's requirements.
 - **rodio** and **cpal** are distributed under MIT/Apache-2.0 licenses, and
   the **Symphonia** audio decoders are distributed under MPL-2.0; see
   `Cargo.lock` for the exact versions.

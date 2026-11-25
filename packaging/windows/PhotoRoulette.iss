@@ -1,6 +1,6 @@
 #define MyAppName "Photo Roulette"
 #ifndef MyAppVersion
-  #define MyAppVersion "1.0.0"
+  #define MyAppVersion "1.1.0"
 #endif
 #define MyAppPublisher "Panagiotis Smponias"
 #define MyAppURL "https://github.com/Panolix/Photo-Roulette"
@@ -46,12 +46,16 @@ Source: "{#ProjectRoot}\assets\PhotoRoulette.ico"; DestDir: "{app}"; Flags: igno
 ; Optional bundled ffmpeg. Put ffmpeg.exe / ffprobe.exe in packaging\windows\ffmpeg.
 #if FileExists(AddBackslash(SourcePath) + "ffmpeg\ffmpeg.exe")
 Source: "{#ProjectRoot}\packaging\windows\ffmpeg\ffmpeg.exe"; DestDir: "{app}"; Flags: ignoreversion
+Source: "{#ProjectRoot}\packaging\windows\ffmpeg\*.dll"; DestDir: "{app}"; Flags: ignoreversion
 #endif
 #if FileExists(AddBackslash(SourcePath) + "ffmpeg\ffprobe.exe")
 Source: "{#ProjectRoot}\packaging\windows\ffmpeg\ffprobe.exe"; DestDir: "{app}"; Flags: ignoreversion
 #endif
-#if FileExists(AddBackslash(SourcePath) + "ffmpeg\LICENSE")
-Source: "{#ProjectRoot}\packaging\windows\ffmpeg\LICENSE"; DestDir: "{app}\licenses"; DestName: "FFMPEG-LICENSE.txt"; Flags: ignoreversion
+#if FileExists(AddBackslash(SourcePath) + "ffmpeg\LICENSE.txt")
+Source: "{#ProjectRoot}\packaging\windows\ffmpeg\LICENSE.txt"; DestDir: "{app}\licenses"; DestName: "FFMPEG-LICENSE.txt"; Flags: ignoreversion
+#endif
+#if FileExists(AddBackslash(SourcePath) + "ffmpeg\SOURCE.txt")
+Source: "{#ProjectRoot}\packaging\windows\ffmpeg\SOURCE.txt"; DestDir: "{app}\licenses"; DestName: "FFMPEG-SOURCE.txt"; Flags: ignoreversion
 #endif
 Source: "{#ProjectRoot}\README.md"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#ProjectRoot}\LICENSE"; DestDir: "{app}"; Flags: ignoreversion

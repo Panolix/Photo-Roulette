@@ -1,5 +1,9 @@
 /target
 /dist
+/build
+/packaging/ffmpeg/bin
+/packaging/linux/ffmpeg
+/packaging/windows/ffmpeg
 .DS_Store
 .idea/
 .vscode/

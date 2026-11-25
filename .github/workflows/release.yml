@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: "Tag to build (for example v1.0.0)"
+        description: "Tag to build (for example v1.1.0)"
         required: true
         type: string
 
@@ -88,7 +88,12 @@ jobs:
             libx11-dev \
             libegl1-mesa-dev \
             libgl1-mesa-dev \
-            libasound2-dev
+            libgl1-mesa-dri \
+            libglx-mesa0 \
+            libxkbcommon-x11-0 \
+            libxcb-xkb1 \
+            libasound2-dev \
+            xvfb
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable
@@ -104,13 +109,30 @@ jobs:
         if: matrix.name == 'macOS'
         env:
           UNIVERSAL: "1"
-        run: ./packaging/macos/make-dmg.sh
+          FFMPEG_BIN_DIR: packaging/ffmpeg/bin
+        run: |
+          brew install nasm
+          ./packaging/ffmpeg/build-macos.sh
+          ./packaging/macos/make-dmg.sh
 
       - name: Verify macOS package
         if: matrix.name == 'macOS'
         run: |
           "dist/Photo Roulette.app/Contents/MacOS/photo-roulette" --version
+          "dist/Photo Roulette.app/Contents/MacOS/ffmpeg" -version | head -n 1
+          "dist/Photo Roulette.app/Contents/MacOS/ffprobe" -version | head -n 1
+          lipo -info "dist/Photo Roulette.app/Contents/MacOS/ffmpeg"
           hdiutil verify dist/*.dmg
+
+      - name: Smoke test packaged macOS app with bundled ffmpeg
+        if: matrix.name == 'macOS'
+        run: |
+          mkdir -p /tmp/roulette-smoke
+          "dist/Photo Roulette.app/Contents/MacOS/ffmpeg" -v error \
+            -f lavfi -i testsrc2=size=320x240:rate=30 -t 1 \
+            -c:v mpeg4 -pix_fmt yuv420p -y /tmp/roulette-smoke/clip.mp4
+          PATH=/usr/bin:/bin \
+            "dist/Photo Roulette.app/Contents/MacOS/photo-roulette" --smoke-test /tmp/roulette-smoke
 
       - name: Build Windows binary
         if: matrix.name == 'Windows'
@@ -119,6 +141,16 @@ jobs:
       - name: Smoke test Windows binary
         if: matrix.name == 'Windows'
         run: .\target\release\photo-roulette.exe --version
+
+      - name: Fetch LGPL ffmpeg (Windows)
+        if: matrix.name == 'Windows'
+        shell: pwsh
+        run: ./packaging/ffmpeg/fetch-windows.ps1
+
+      - name: Smoke test bundled ffmpeg (Windows)
+        if: matrix.name == 'Windows'
+        shell: pwsh
+        run: .\packaging\windows\ffmpeg\ffmpeg.exe -version | Select-Object -First 1
 
       - name: Install Inno Setup
         if: matrix.name == 'Windows'
@@ -131,15 +163,44 @@ jobs:
           $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
           & $iscc "/DMyAppVersion=$env:VERSION" "packaging/windows/PhotoRoulette.iss"
 
+      - name: Test installed Windows package
+        if: matrix.name == 'Windows'
+        shell: pwsh
+        run: |
+          $installer = Get-ChildItem dist\Photo-Roulette-Setup-*.exe | Select-Object -First 1
+          Start-Process -FilePath $installer.FullName -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART' -Wait
+          & "$env:LOCALAPPDATA\Programs\Photo Roulette\ffmpeg.exe" -version | Select-Object -First 1
+
+      - name: Fetch LGPL ffmpeg (Linux)
+        if: matrix.name == 'Linux'
+        run: ./packaging/ffmpeg/fetch-linux.sh
+
       - name: Build Linux packages
         if: matrix.name == 'Linux'
+        env:
+          FFMPEG_DIR: packaging/linux/ffmpeg
         run: ./packaging/linux/build-packages.sh
 
       - name: Verify Linux package
         if: matrix.name == 'Linux'
         run: |
           ./target/release/photo-roulette --version
-          dpkg-deb -c dist/*.deb | grep -E 'usr/bin/photo-roulette|applications/photo-roulette.desktop|icons/hicolor'
+          LD_LIBRARY_PATH=packaging/linux/ffmpeg/lib \
+            packaging/linux/ffmpeg/bin/ffmpeg -version | head -n 1
+          dpkg-deb -c dist/*.deb | grep -E 'usr/bin/photo-roulette|applications/photo-roulette.desktop|icons/hicolor|usr/lib/photo-roulette/(ffmpeg|ffprobe|libavcodec)'
+
+      - name: Smoke test installed Linux app with bundled ffmpeg
+        if: matrix.name == 'Linux'
+        env:
+          LIBGL_ALWAYS_SOFTWARE: "1"
+        run: |
+          sudo apt-get install -y ./dist/*.deb
+          mkdir -p /tmp/roulette-smoke
+          LD_LIBRARY_PATH="$PWD/packaging/linux/ffmpeg/lib" \
+            packaging/linux/ffmpeg/bin/ffmpeg -v error \
+            -f lavfi -i testsrc2=size=320x240:rate=30 -t 1 \
+            -c:v mpeg4 -pix_fmt yuv420p -y /tmp/roulette-smoke/clip.mp4
+          xvfb-run -a /usr/bin/photo-roulette --smoke-test /tmp/roulette-smoke
 
       - name: Upload build artifacts
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2

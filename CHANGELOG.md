@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.1.0 — 2026-11-25
+
+- Release packages now bundle LGPL FFmpeg, so videos work without a separate install.
+- macOS uses a universal LGPL build produced from source in CI (arm64 + x86_64, macOS 11+).
+- Windows and Linux use pinned BtbN LGPL builds with SHA-256 verification.
+- FFmpeg license and source/build information are included in every package.
+- The app finds bundled FFmpeg next to the executable, in a `ffmpeg/` subfolder, or in `/usr/lib/photo-roulette/` on Linux; external FFmpeg is still supported for source builds.
+- Release verification runs the bundled `ffmpeg`/`ffprobe` on each platform and checks the installed Windows package.
+- Removed folder-name clutter from the window title and deal counter, and simplified the empty state by dropping the deck illustration.
+
 ## 1.0.0 — 2026-11-25
 
 The first stable release. The core feature set is complete; this release is

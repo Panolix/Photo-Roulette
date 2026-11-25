@@ -1,7 +1,7 @@
 # Photo Roulette
 
 <p align="center">
-  <img src="assets/PhotoRoulette-256.png?v=1.0.0" width="128" alt="Photo Roulette icon">
+  <img src="assets/PhotoRoulette-256.png?v=1.1.0" width="128" alt="Photo Roulette icon">
 </p>
 
 [![Platform](https://img.shields.io/badge/Platform-macOS%20%7C%20Windows%20%7C%20Linux-blue)](https://github.com/Panolix/Photo-Roulette/releases)
@@ -46,17 +46,23 @@ Grab a build from the [latest release](https://github.com/Panolix/Photo-Roulette
 
 | OS | Artifact | Notes |
 | --- | --- | --- |
-| macOS (Apple Silicon + Intel) | `Photo-Roulette-*-macOS-universal.dmg` | Drag **Photo Roulette** into Applications. Ad-hoc signed, not notarized. |
-| Windows x64 | `Photo-Roulette-Setup-*.exe` | Inno Setup installer. |
-| Linux x86_64 | `photo-roulette_*_amd64.deb` or `photo-roulette-*-linux-x86_64.tar.gz` | `sudo apt install ./photo-roulette_*_amd64.deb` |
+| macOS (Apple Silicon + Intel) | `Photo-Roulette-*-macOS-universal.dmg` | Includes FFmpeg. Drag **Photo Roulette** into Applications. Ad-hoc signed, not notarized. |
+| Windows x64 | `Photo-Roulette-Setup-*.exe` | Includes FFmpeg. Inno Setup installer. |
+| Linux x86_64 | `photo-roulette_*_amd64.deb` or `photo-roulette-*-linux-x86_64.tar.gz` | Includes FFmpeg. `sudo apt install ./photo-roulette_*_amd64.deb` |
 
-The macOS app is ad-hoc signed because it is built locally without an Apple
-Developer ID. On a machine other than the build machine, Gatekeeper may require
+Installers are larger than the app itself because they bundle an LGPL FFmpeg
+build for offline video playback. The macOS app is ad-hoc signed because it is
+built without an Apple Developer ID. On another Mac, Gatekeeper may require
 right-click → **Open** the first time.
 
 ## Video support
 
-Video playback requires [ffmpeg](https://ffmpeg.org/) to be installed:
+Release packages include [ffmpeg](https://ffmpeg.org/), so videos work without a
+separate install. The app looks for FFmpeg next to the executable, in its
+`ffmpeg/` subfolder, in common install locations, and in `PATH`. It also has a
+**Locate ffmpeg** dialog that remembers a custom path.
+
+Source builds do not include FFmpeg; install it or build the bundle:
 
 ```sh
 # macOS
@@ -69,21 +75,23 @@ winget install Gyan.FFmpeg
 sudo apt install ffmpeg
 ```
 
-The app looks for ffmpeg next to the executable, in common install locations,
-and in `PATH`. It also has a **Locate ffmpeg** dialog that remembers a custom
-path. It supports the formats ffmpeg can decode, including **MP4, MOV, M4V, WMV,
+The app supports the formats FFmpeg can decode, including **MP4, MOV, M4V, WMV,
 AVI, MKV, and WebM**. Videos are decoded to a maximum of 1920 px at 30 fps.
+Audio is extracted as compact AAC/M4A before playback, with a WAV fallback.
+Video playback, including sound, works on macOS, Windows, and Linux.
 
-Video playback, including sound, works on macOS, Windows, and Linux when
-ffmpeg is available. If ffmpeg is missing, photos still work; videos are skipped
-and the app explains how to install or locate ffmpeg. Audio is extracted as
-compact AAC/M4A before playback, with a WAV fallback.
+### Bundling FFmpeg
 
-### Bundling ffmpeg
+Release builds use `packaging/ffmpeg/`:
 
-If you are building a release and want to ship ffmpeg with it, see
-[`packaging/ffmpeg/README.md`](packaging/ffmpeg/README.md). Use an LGPL build for
-redistribution and include its license; many prebuilt full builds are GPL.
+- macOS: `build-macos.sh` builds a universal LGPL FFmpeg from source.
+- Windows/Linux: `fetch-windows.ps1` / `fetch-linux.sh` download pinned BtbN LGPL
+  builds and verify their SHA-256 checksums.
+
+The bundled builds are unmodified LGPL redistributions; license and source
+information are included in each package. See
+[`packaging/ffmpeg/README.md`](packaging/ffmpeg/README.md). Do not bundle a GPL
+build into a non-commercial package without meeting the GPL's requirements.
 
 ## Controls
 
@@ -135,10 +143,10 @@ speed.
 ./packaging/macos/make-dmg.sh
 
 # Windows installer (run on Windows with Inno Setup installed)
-iscc packaging/windows/PhotoRoulette.iss /DMyAppVersion=1.0.0
+iscc packaging/windows/PhotoRoulette.iss /DMyAppVersion=1.1.0
 
 # Linux .deb and portable tarball (run on Linux)
-VERSION=1.0.0 ./packaging/linux/build-packages.sh
+VERSION=1.1.0 ./packaging/linux/build-packages.sh
 ```
 
 GitHub Actions builds the macOS DMG, Windows installer, Linux `.deb`, and Linux
@@ -146,8 +154,8 @@ tarball for each tagged release, and publishes a `SHA256SUMS` file. Tag a
 release with:
 
 ```sh
-git tag v1.0.0
-git push origin v1.0.0
+git tag v1.1.0
+git push origin v1.1.0
 ```
 
 The workflows live in `.github/workflows/ci.yml` and `.github/workflows/release.yml`.
@@ -211,20 +219,20 @@ Package-content and CLI checks run alongside those tests.
 - Windows installers are unsigned, so SmartScreen may warn on first launch.
 - Video controls support play/pause, seek, restart, and volume, but not speed or
   subtitles.
-- HEIC on Windows/Linux depends on the installed ffmpeg build including an HEIF
+- HEIC on Windows/Linux depends on the bundled FFmpeg build including an HEIF
   decoder. macOS always supports it through ImageIO.
 - No RAW/PSD support.
 - The app does not modify or delete anything in the imported folder.
-- The default packages do not bundle ffmpeg; use the optional hooks in
-  `packaging/ffmpeg/` if you want to ship it.
+- Installers are roughly 50–100 MB because they include FFmpeg.
 
 ## Credits
 
 - **Archivo Black** — Omnibus-Type, SIL Open Font License
 - **Space Grotesk** — Florian Karsten, SIL Open Font License
 - **Bootstrap Icons** — The Bootstrap Authors, MIT License (restart glyph)
-- Video decoding via [ffmpeg](https://ffmpeg.org/); optional bundling hooks are
-  documented in `packaging/ffmpeg/`.
+- Video decoding via [ffmpeg](https://ffmpeg.org/), bundled in release packages
+  as an LGPL build. macOS builds from source; Windows/Linux use pinned
+  [BtbN FFmpeg-Builds](https://github.com/BtbN/FFmpeg-Builds) artifacts.
 - Built with [egui](https://github.com/emilk/egui) / eframe.
 
 License files for the fonts and icon are in `assets/fonts/` and `assets/icons/`.

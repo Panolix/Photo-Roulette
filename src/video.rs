@@ -188,7 +188,7 @@ fn spawn_frame_decoder(
     height: usize,
 ) -> Result<Child, String> {
     let filter = format!("scale={width}:{height}:flags=lanczos,fps={FPS}");
-    let mut command = Command::new(ffmpeg);
+    let mut command = ffmpeg_command(ffmpeg);
     command.args(["-v", "error", "-nostdin"]);
     if start_offset > 0.0 {
         command.arg("-ss").arg(format!("{start_offset:.3}"));
@@ -217,7 +217,7 @@ fn extract_poster(
     path: &Path,
     start_offset: f64,
 ) -> Result<(usize, usize, ColorImage), String> {
-    let mut command = Command::new(ffmpeg);
+    let mut command = ffmpeg_command(ffmpeg);
     command.args(["-v", "error", "-nostdin"]);
     if start_offset > 0.0 {
         command.arg("-ss").arg(format!("{start_offset:.3}"));
@@ -231,7 +231,8 @@ fn extract_poster(
         .arg(format!(
             "scale=w='min({MAX_DIMENSION},iw)':h='min({MAX_DIMENSION},ih)':force_original_aspect_ratio=decrease:flags=lanczos"
         ))
-        .args(["-frames:v", "1", "-f", "image2pipe", "-vcodec", "png", "-"])
+        // BMP is dependency-free in FFmpeg builds that disable zlib.
+        .args(["-frames:v", "1", "-f", "image2pipe", "-vcodec", "bmp", "-"])
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .output()
@@ -300,7 +301,7 @@ fn extract_audio_as(
     minimum_size: u64,
 ) -> Option<PathBuf> {
     let output = temp_file(extension);
-    let mut command = Command::new(ffmpeg);
+    let mut command = ffmpeg_command(ffmpeg);
     command.args(["-v", "error", "-nostdin"]);
     if start_offset > 0.0 {
         command.arg("-ss").arg(format!("{start_offset:.3}"));
@@ -330,7 +331,7 @@ fn extract_audio_as(
 
 fn probe_duration(path: &Path) -> Option<f64> {
     let ffprobe = ffprobe()?;
-    let output = Command::new(ffprobe)
+    let output = ffmpeg_command(&ffprobe)
         .args([
             "-v",
             "error",
@@ -435,7 +436,7 @@ pub fn custom_ffmpeg() -> Option<PathBuf> {
 }
 
 pub fn validate_ffmpeg(path: &Path) -> bool {
-    Command::new(path)
+    ffmpeg_command(path)
         .arg("-version")
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
@@ -471,6 +472,30 @@ pub fn find_ffmpeg() -> Option<PathBuf> {
 
 fn ffmpeg() -> Option<PathBuf> {
     find_binary("ffmpeg")
+}
+
+/// Spawn an ffmpeg/ffprobe binary, pointing the Linux loader at bundled
+/// shared libraries when the build uses them.
+fn ffmpeg_command(binary: &Path) -> Command {
+    #[cfg(target_os = "linux")]
+    {
+        let mut command = Command::new(binary);
+        if let Some(directory) = binary.parent() {
+            let mut paths = vec![directory.to_path_buf(), directory.join("lib")];
+            if let Some(existing) = std::env::var_os("LD_LIBRARY_PATH") {
+                paths.extend(std::env::split_paths(&existing));
+            }
+            if let Ok(value) = std::env::join_paths(paths) {
+                command.env("LD_LIBRARY_PATH", value);
+            }
+        }
+        command
+    }
+
+    #[cfg(not(target_os = "linux"))]
+    {
+        Command::new(binary)
+    }
 }
 
 fn ffprobe() -> Option<PathBuf> {
@@ -516,6 +541,7 @@ fn find_binary(name: &str) -> Option<PathBuf> {
     {
         for candidate in [
             directory.join(&file_name),
+            directory.join("ffmpeg").join(&file_name),
             directory.join("../lib/photo-roulette").join(&file_name),
         ] {
             if candidate.is_file() {
