@@ -1,7 +1,7 @@
 # Photo Roulette
 
 <p align="center">
-  <img src="assets/PhotoRoulette-256.png?v=0.4.0" width="128" alt="Photo Roulette icon">
+  <img src="assets/PhotoRoulette-256.png?v=1.0.0" width="128" alt="Photo Roulette icon">
 </p>
 
 [![Platform](https://img.shields.io/badge/Platform-macOS%20%7C%20Windows%20%7C%20Linux-blue)](https://github.com/Panolix/Photo-Roulette/releases)
@@ -135,10 +135,10 @@ speed.
 ./packaging/macos/make-dmg.sh
 
 # Windows installer (run on Windows with Inno Setup installed)
-iscc packaging/windows/PhotoRoulette.iss /DMyAppVersion=0.4.0
+iscc packaging/windows/PhotoRoulette.iss /DMyAppVersion=1.0.0
 
 # Linux .deb and portable tarball (run on Linux)
-VERSION=0.4.0 ./packaging/linux/build-packages.sh
+VERSION=1.0.0 ./packaging/linux/build-packages.sh
 ```
 
 GitHub Actions builds the macOS DMG, Windows installer, Linux `.deb`, and Linux
@@ -146,8 +146,8 @@ tarball for each tagged release, and publishes a `SHA256SUMS` file. Tag a
 release with:
 
 ```sh
-git tag v0.4.0
-git push origin v0.4.0
+git tag v1.0.0
+git push origin v1.0.0
 ```
 
 The workflows live in `.github/workflows/ci.yml` and `.github/workflows/release.yml`.
@@ -200,8 +200,9 @@ cargo audit
 
 The test suite covers the shuffle bag, folder scanning and cancellation,
 settings/history, and a generated-video pipeline test (skipped automatically if
-ffmpeg is not installed). CI runs the same checks on macOS, Windows, and Linux,
-plus CLI and package smoke tests.
+ffmpeg is not installed). CI also launches the real GUI with `--smoke-test`,
+loads an image, renders it, and exits cleanly on macOS, Windows, and Linux.
+Package-content and CLI checks run alongside those tests.
 
 ## Known limitations
 

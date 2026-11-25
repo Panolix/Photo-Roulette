@@ -268,6 +268,14 @@ struct ScanState {
     started: Instant,
 }
 
+struct SmokeTest {
+    started: Instant,
+    ticks: u32,
+    expect_media: bool,
+    dealt: bool,
+    closing: bool,
+}
+
 struct PhotoRoulette {
     library: Vec<PathBuf>,
     folder_label: Option<String>,
@@ -288,10 +296,15 @@ struct PhotoRoulette {
     show_ffmpeg_dialog: bool,
     notice: Option<Notice>,
     restart_icon: egui::TextureHandle,
+    smoke_test: Option<SmokeTest>,
 }
 
 impl PhotoRoulette {
-    fn new(cc: &eframe::CreationContext<'_>, initial_folder: Option<PathBuf>) -> Self {
+    fn new(
+        cc: &eframe::CreationContext<'_>,
+        initial_folder: Option<PathBuf>,
+        smoke_test: bool,
+    ) -> Self {
         theme::install(&cc.egui_ctx);
         cc.egui_ctx
             .send_viewport_cmd(egui::ViewportCommand::SetTheme(egui::SystemTheme::Dark));
@@ -320,12 +333,24 @@ impl PhotoRoulette {
         } else {
             0.85
         };
-        let startup_folder = initial_folder.or_else(|| {
-            settings
-                .last_folder
-                .as_ref()
-                .filter(|path| path.exists())
-                .cloned()
+        let startup_folder = if smoke_test {
+            initial_folder
+        } else {
+            initial_folder.or_else(|| {
+                settings
+                    .last_folder
+                    .as_ref()
+                    .filter(|path| path.exists())
+                    .cloned()
+            })
+        };
+        let expect_media = startup_folder.is_some();
+        let smoke_test = smoke_test.then(|| SmokeTest {
+            started: Instant::now(),
+            ticks: 0,
+            expect_media,
+            dealt: false,
+            closing: false,
         });
 
         let (tx, rx) = channel();
@@ -349,6 +374,7 @@ impl PhotoRoulette {
             show_ffmpeg_dialog: false,
             notice: None,
             restart_icon,
+            smoke_test,
         };
 
         if let Some(folder) = startup_folder {
@@ -521,7 +547,7 @@ impl PhotoRoulette {
         }
         self.notify(ctx, NoticeKind::Info, message);
 
-        if self.last_roots.len() == 1 && self.last_roots[0].is_dir() {
+        if self.smoke_test.is_none() && self.last_roots.len() == 1 && self.last_roots[0].is_dir() {
             self.settings.last_folder = Some(self.last_roots[0].clone());
             self.settings.save();
         }
@@ -1053,6 +1079,65 @@ impl PhotoRoulette {
         if let Some(video) = &self.current_video {
             video.set_volume(self.settings.volume);
         }
+    }
+
+    fn smoke_test_tick(&mut self, ctx: &egui::Context) {
+        let Some(smoke) = self.smoke_test.as_ref() else {
+            return;
+        };
+        if smoke.closing {
+            return;
+        }
+
+        let ticks = smoke.ticks + 1;
+        let started = smoke.started;
+        let expect_media = smoke.expect_media;
+        let dealt = smoke.dealt;
+        if let Some(smoke) = self.smoke_test.as_mut() {
+            smoke.ticks = ticks;
+        }
+
+        if started.elapsed() > Duration::from_secs(30) {
+            eprintln!("GUI smoke test timed out");
+            std::process::exit(1);
+        }
+        if ticks < 3 || self.scan.is_some() {
+            ctx.request_repaint();
+            return;
+        }
+        if self.pending.is_some() || self.pending_video.is_some() {
+            ctx.request_repaint();
+            return;
+        }
+        if self.library.is_empty() {
+            if expect_media {
+                eprintln!("GUI smoke test failed: no media loaded");
+                std::process::exit(1);
+            }
+            println!("GUI smoke test ok (empty state)");
+            if let Some(smoke) = self.smoke_test.as_mut() {
+                smoke.closing = true;
+            }
+            ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+            return;
+        }
+        if !dealt {
+            if let Some(smoke) = self.smoke_test.as_mut() {
+                smoke.dealt = true;
+            }
+            self.deal(ctx);
+            ctx.request_repaint();
+            return;
+        }
+        if self.current.is_some() || self.current_video.is_some() {
+            println!("GUI smoke test ok (media rendered)");
+            if let Some(smoke) = self.smoke_test.as_mut() {
+                smoke.closing = true;
+            }
+            ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+            return;
+        }
+        ctx.request_repaint();
     }
 
     fn top_bar(&mut self, ctx: &egui::Context) {
@@ -1618,6 +1703,7 @@ impl eframe::App for PhotoRoulette {
         self.stage(ctx);
         self.drop_overlay(ctx);
         self.ffmpeg_dialog(ctx);
+        self.smoke_test_tick(ctx);
     }
 }
 
@@ -2475,6 +2561,7 @@ fn app_icon() -> egui::IconData {
 
 fn main() -> eframe::Result {
     let mut initial_folder = None;
+    let mut smoke_test = false;
     for argument in std::env::args().skip(1) {
         match argument.as_str() {
             "-h" | "--help" => {
@@ -2485,6 +2572,7 @@ fn main() -> eframe::Result {
                 println!("photo-roulette {}", env!("CARGO_PKG_VERSION"));
                 return Ok(());
             }
+            "--smoke-test" => smoke_test = true,
             value if value.starts_with('-') => {
                 eprintln!("Unknown option: {value}\n");
                 print_help();
@@ -2505,7 +2593,7 @@ fn main() -> eframe::Result {
     eframe::run_native(
         "Photo Roulette",
         options,
-        Box::new(move |cc| Ok(Box::new(PhotoRoulette::new(cc, initial_folder)))),
+        Box::new(move |cc| Ok(Box::new(PhotoRoulette::new(cc, initial_folder, smoke_test)))),
     )
 }
 
@@ -2516,8 +2604,9 @@ fn print_help() {
          USAGE:\n\
          \x20   photo-roulette [FOLDER]\n\n\
          OPTIONS:\n\
-         \x20   -h, --help       Show this help\n\
-         \x20   -V, --version    Show the version\n\n\
+         \x20   -h, --help         Show this help\n\
+         \x20   -V, --version      Show the version\n\
+         \x20   --smoke-test       Open, verify startup, and exit (CI)\n\n\
          CONTROLS:\n\
          \x20   Space             Deal the next item\n\
          \x20   Backspace         Go back to the previous item\n\

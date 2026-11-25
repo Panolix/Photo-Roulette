@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.0.0 — 2026-11-25
+
+The first stable release. The core feature set is complete; this release is
+about trustworthy behavior, clear packaging, and automated checks.
+
+- GUI smoke tests launch the real app, load an image, and exit cleanly on macOS, Windows, and Linux CI.
+- Background scanning, settings persistence, volume/mute, back navigation, 1080p video, compact AAC audio, and the ffmpeg setup dialog from 0.4.0 are included.
+- Stable 1.0 versioning and release artifacts with SHA-256 checksums.
+
 ## 0.4.0 — 2026-11-25
 
 - Folder scanning now runs in the background with a live file count and a cancel button.
