@@ -130,7 +130,7 @@ pub fn install(ctx: &egui::Context) {
     style.spacing.interact_size.y = 32.0;
     style.animation_time = 0.16;
     style.text_styles = [
-        (egui::TextStyle::Heading, display_font(28.0)),
+        (egui::TextStyle::Heading, display_font(22.0)),
         (egui::TextStyle::Body, body_font(15.0)),
         (egui::TextStyle::Button, bold_font(14.0)),
         (egui::TextStyle::Small, body_font(11.5)),

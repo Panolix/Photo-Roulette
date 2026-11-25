@@ -1,7 +1,7 @@
 # Photo Roulette
 
 <p align="center">
-  <img src="assets/PhotoRoulette-256.png?v=0.3.0" width="128" alt="Photo Roulette icon">
+  <img src="assets/PhotoRoulette-256.png?v=0.4.0" width="128" alt="Photo Roulette icon">
 </p>
 
 [![Platform](https://img.shields.io/badge/Platform-macOS%20%7C%20Windows%20%7C%20Linux-blue)](https://github.com/Panolix/Photo-Roulette/releases)
@@ -17,6 +17,10 @@ per round, so nobody has to see the same cursed memory twice.
 
 Everything stays local. No account, cloud service, upload, or tracking.
 
+<p align="center">
+  <img src="docs/screenshot.png" width="760" alt="Photo Roulette showing a photo with its player controls">
+</p>
+
 ## Features
 
 - Imports a folder of photos and videos, including subfolders.
@@ -24,12 +28,16 @@ Everything stays local. No account, cloud service, upload, or tracking.
 - Uses a shuffle bag: no repeats until every item in the round has been shown.
 - Starts a new round with a fresh shuffle when the deck runs out.
 - Avoids opening a new round with the item that just closed the previous one.
+- Folder scanning happens in the background, with a live file count and a cancel button.
 - Photos and video frames are decoded in the background, so the UI stays responsive.
 - Click a video to pause/resume; drag the timeline to seek; restart without advancing the round.
+- Volume slider, `M` to mute, and remembered volume.
+- `‹ BACK` / `Backspace` returns to the previous item without messing up the round.
+- Remembers the last folder, volume, filename overlay, and window geometry.
 - Fullscreen mode for group viewing.
 - Optional filename overlay.
 - Drag a folder (or a pile of files) straight onto the window.
-- Handles EXIF rotation, large images, transparency, HEIC/AVIF (macOS), and many video formats.
+- Handles EXIF rotation, large images, transparency, HEIC/AVIF, and many video formats.
 - No repeats are based on file paths; make sure your folder doesn't contain duplicate copies.
 
 ## Download
@@ -62,13 +70,20 @@ sudo apt install ffmpeg
 ```
 
 The app looks for ffmpeg next to the executable, in common install locations,
-and in `PATH`. It supports the formats ffmpeg can decode, including **MP4, MOV,
-M4V, WMV, AVI, MKV, and WebM**. Videos are decoded to a maximum of 1280 px at
-30 fps.
+and in `PATH`. It also has a **Locate ffmpeg** dialog that remembers a custom
+path. It supports the formats ffmpeg can decode, including **MP4, MOV, M4V, WMV,
+AVI, MKV, and WebM**. Videos are decoded to a maximum of 1920 px at 30 fps.
 
 Video playback, including sound, works on macOS, Windows, and Linux when
-ffmpeg is available. If ffmpeg is missing, videos are skipped and the app stays
-in photo-only mode.
+ffmpeg is available. If ffmpeg is missing, photos still work; videos are skipped
+and the app explains how to install or locate ffmpeg. Audio is extracted as
+compact AAC/M4A before playback, with a WAV fallback.
+
+### Bundling ffmpeg
+
+If you are building a release and want to ship ffmpeg with it, see
+[`packaging/ffmpeg/README.md`](packaging/ffmpeg/README.md). Use an LGPL build for
+redistribution and include its license; many prebuilt full builds are GPL.
 
 ## Controls
 
@@ -76,9 +91,11 @@ in photo-only mode.
 | --- | --- |
 | Import / change folder | Button in the top right, or drop a folder on the window |
 | Deal the next item | Big button, or press `Space` |
+| Go back one item | `‹ BACK`, or press `Backspace` |
 | Pause / play video | Click the video, or press `P` |
 | Seek video | Drag the timeline, or use `←` / `→` |
 | Restart video | Circular arrow on the video, or press `R` |
+| Mute / unmute | `M`, or the volume slider |
 | Fullscreen | `F`, or the fullscreen button |
 | Open the folder picker | `Cmd+O` / `Ctrl+O` |
 
@@ -118,18 +135,19 @@ speed.
 ./packaging/macos/make-dmg.sh
 
 # Windows installer (run on Windows with Inno Setup installed)
-iscc packaging/windows/PhotoRoulette.iss /DMyAppVersion=0.3.0
+iscc packaging/windows/PhotoRoulette.iss /DMyAppVersion=0.4.0
 
 # Linux .deb and portable tarball (run on Linux)
-VERSION=0.3.0 ./packaging/linux/build-packages.sh
+VERSION=0.4.0 ./packaging/linux/build-packages.sh
 ```
 
 GitHub Actions builds the macOS DMG, Windows installer, Linux `.deb`, and Linux
-tarball for each tagged release. Tag a release with:
+tarball for each tagged release, and publishes a `SHA256SUMS` file. Tag a
+release with:
 
 ```sh
-git tag v0.3.0
-git push origin v0.3.0
+git tag v0.4.0
+git push origin v0.4.0
 ```
 
 The workflows live in `.github/workflows/ci.yml` and `.github/workflows/release.yml`.
@@ -137,13 +155,27 @@ The workflows live in `.github/workflows/ci.yml` and `.github/workflows/release.
 ## Media formats
 
 Photos: JPG, PNG, GIF, WebP, BMP, TIFF, QOI, TGA, HDR, EXR, and more. On macOS,
-HEIC/HEIF and AVIF are supported through the system's ImageIO decoder (`sips`).
+HEIC/HEIF and AVIF are supported through ImageIO (`sips`); on Windows and Linux
+they go through ffmpeg when it is installed. HEIC support depends on the ffmpeg
+build including an HEIF decoder.
 
 Videos: MP4, MOV, M4V, WMV, AVI, MKV, WebM, FLV, MPEG, 3GP, and other formats
 ffmpeg can decode.
 
 Unreadable files are skipped automatically. Folders are scanned recursively;
-hidden folders and macOS photo libraries/app bundles are ignored.
+hidden folders and macOS photo libraries/app bundles are ignored. Scanning can
+be cancelled and never blocks the window.
+
+## Settings
+
+Settings are stored as JSON in the platform config directory:
+
+- macOS: `~/Library/Application Support/com.panolix.photoroulette/settings.json`
+- Windows: `%APPDATA%\PhotoRoulette\settings.json`
+- Linux: `~/.config/photo-roulette/settings.json` (or `$XDG_CONFIG_HOME`)
+
+They contain the last folder path, volume, filename-overlay preference, and an
+optional custom ffmpeg path. Delete the file to reset the app.
 
 ## How the "no repeats" part works
 
@@ -156,23 +188,44 @@ only unavoidable repeat.
 Visually identical copies saved as different files are still separate items.
 Remove duplicates before the party if you don't want them to appear twice.
 
+## Development
+
+```sh
+cargo fmt --all -- --check
+cargo clippy --locked --all-targets -- -D warnings
+cargo test --locked
+cargo deny check
+cargo audit
+```
+
+The test suite covers the shuffle bag, folder scanning and cancellation,
+settings/history, and a generated-video pipeline test (skipped automatically if
+ffmpeg is not installed). CI runs the same checks on macOS, Windows, and Linux,
+plus CLI and package smoke tests.
+
 ## Known limitations
 
 - macOS app builds are ad-hoc signed and not notarized.
-- Video controls support play/pause, seek, and restart, but not volume, speed,
-  or subtitle controls.
+- Windows installers are unsigned, so SmartScreen may warn on first launch.
+- Video controls support play/pause, seek, restart, and volume, but not speed or
+  subtitles.
+- HEIC on Windows/Linux depends on the installed ffmpeg build including an HEIF
+  decoder. macOS always supports it through ImageIO.
 - No RAW/PSD support.
 - The app does not modify or delete anything in the imported folder.
-- The macOS app does not bundle ffmpeg; install it separately for video.
+- The default packages do not bundle ffmpeg; use the optional hooks in
+  `packaging/ffmpeg/` if you want to ship it.
 
 ## Credits
 
 - **Archivo Black** — Omnibus-Type, SIL Open Font License
 - **Space Grotesk** — Florian Karsten, SIL Open Font License
-- Video decoding via [ffmpeg](https://ffmpeg.org/); not bundled with the app.
+- **Bootstrap Icons** — The Bootstrap Authors, MIT License (restart glyph)
+- Video decoding via [ffmpeg](https://ffmpeg.org/); optional bundling hooks are
+  documented in `packaging/ffmpeg/`.
 - Built with [egui](https://github.com/emilk/egui) / eframe.
 
-License files for the fonts are in `assets/fonts/`.
+License files for the fonts and icon are in `assets/fonts/` and `assets/icons/`.
 
 ## License
 

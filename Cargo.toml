@@ -1,6 +1,6 @@
 [package]
 name = "photo-roulette"
-version = "0.3.0"
+version = "0.4.0"
 edition = "2024"
 description = "A tiny photo and video roulette for group cringe sessions."
 authors = ["Panagiotis Smponias"]
@@ -12,11 +12,25 @@ keywords = ["photo", "video", "egui", "roulette", "party"]
 categories = ["graphics", "multimedia", "gui"]
 
 [dependencies]
-eframe = "0.31"
-image = "0.25"
+eframe = { version = "0.31", features = ["persistence"] }
+image = { version = "0.25", default-features = false, features = [
+    "bmp",
+    "exr",
+    "gif",
+    "hdr",
+    "ico",
+    "jpeg",
+    "png",
+    "qoi",
+    "tga",
+    "tiff",
+    "webp",
+] }
 rand = "0.9"
 rfd = "0.15"
-rodio = { version = "0.23", default-features = false, features = ["playback", "wav"] }
+rodio = { version = "0.23", default-features = false, features = ["playback", "wav", "mp4"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
 
 [profile.release]
 strip = true

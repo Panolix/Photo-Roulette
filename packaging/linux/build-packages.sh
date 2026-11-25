@@ -21,6 +21,21 @@ mkdir -p "$DEB_ROOT/DEBIAN" \
          "$DEB_ROOT/usr/share/doc/photo-roulette"
 
 install -m 755 "$BIN" "$DEB_ROOT/usr/bin/photo-roulette"
+
+# Optional bundled ffmpeg. See packaging/ffmpeg/README.md before shipping this.
+if [ -n "${FFMPEG_BIN_DIR:-}" ]; then
+    mkdir -p "$DEB_ROOT/usr/lib/photo-roulette"
+    for binary in ffmpeg ffprobe; do
+        if [ -f "$FFMPEG_BIN_DIR/$binary" ]; then
+            install -m 755 "$FFMPEG_BIN_DIR/$binary" \
+                "$DEB_ROOT/usr/lib/photo-roulette/$binary"
+        fi
+    done
+    if [ -f "$FFMPEG_BIN_DIR/LICENSE" ]; then
+        install -m 644 "$FFMPEG_BIN_DIR/LICENSE" \
+            "$DEB_ROOT/usr/share/doc/photo-roulette/FFMPEG-LICENSE.txt"
+    fi
+fi
 install -m 644 packaging/linux/photo-roulette.desktop \
   "$DEB_ROOT/usr/share/applications/photo-roulette.desktop"
 install -m 644 assets/PhotoRoulette-256.png \
@@ -58,6 +73,16 @@ cp packaging/linux/photo-roulette.desktop "$PORTABLE/"
 cp assets/PhotoRoulette-256.png "$PORTABLE/photo-roulette.png"
 cp assets/fonts/OFL-ArchivoBlack.txt assets/fonts/OFL-SpaceGrotesk.txt \
   assets/icons/LICENSE-bootstrap-icons.txt "$PORTABLE/"
+if [ -n "${FFMPEG_BIN_DIR:-}" ]; then
+    for binary in ffmpeg ffprobe; do
+        if [ -f "$FFMPEG_BIN_DIR/$binary" ]; then
+            install -m 755 "$FFMPEG_BIN_DIR/$binary" "$PORTABLE/$binary"
+        fi
+    done
+    if [ -f "$FFMPEG_BIN_DIR/LICENSE" ]; then
+        cp "$FFMPEG_BIN_DIR/LICENSE" "$PORTABLE/FFMPEG-LICENSE.txt"
+    fi
+fi
 tar -czf "$TARBALL" -C "$(dirname "$PORTABLE")" "$(basename "$PORTABLE")"
 
 echo "Built:"

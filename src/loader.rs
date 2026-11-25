@@ -1,10 +1,12 @@
 //! Finding photos and videos on disk and turning images into pixels.
 
 use std::collections::HashSet;
+use std::fmt;
 use std::fs;
 use std::path::{Path, PathBuf};
 #[cfg(target_os = "macos")]
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::AtomicU64;
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 use eframe::egui::ColorImage;
 use image::metadata::Orientation;
@@ -31,20 +33,53 @@ pub struct LoadedPhoto {
     pub image: ColorImage,
 }
 
+#[derive(Debug)]
 pub struct MediaLibrary {
     pub media: Vec<PathBuf>,
     pub label: String,
     pub skipped: usize,
+    pub skipped_transcoded: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ScanError {
+    Cancelled,
+    Message(String),
+}
+
+impl fmt::Display for ScanError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Cancelled => formatter.write_str("Scan cancelled."),
+            Self::Message(message) => formatter.write_str(message),
+        }
+    }
 }
 
 /// Scan folders (recursively) and media files into a de-duplicated library.
+#[cfg(test)]
 pub fn collect_media(roots: &[PathBuf]) -> Result<MediaLibrary, String> {
+    let cancel = AtomicBool::new(false);
+    let progress = AtomicUsize::new(0);
+    collect_media_interruptible(roots, &cancel, &progress).map_err(|error| error.to_string())
+}
+
+/// Interruptible scan used by the UI so huge folders never freeze the window.
+pub fn collect_media_interruptible(
+    roots: &[PathBuf],
+    cancel: &AtomicBool,
+    progress: &AtomicUsize,
+) -> Result<MediaLibrary, ScanError> {
     let mut found = Vec::new();
     let mut skipped = 0usize;
+    let mut skipped_transcoded = 0usize;
     let mut label = None;
     let mut root_exists = false;
 
     for root in roots {
+        if cancel.load(Ordering::Relaxed) {
+            return Err(ScanError::Cancelled);
+        }
         if root.exists() {
             root_exists = true;
         }
@@ -53,21 +88,39 @@ pub fn collect_media(roots: &[PathBuf]) -> Result<MediaLibrary, String> {
             if label.is_none() {
                 label = folder_label(root);
             }
-            walk(root, 0, &mut found, &mut skipped);
+            walk(
+                root,
+                0,
+                &mut found,
+                &mut skipped,
+                &mut skipped_transcoded,
+                cancel,
+                progress,
+            );
         } else if root.is_file() && is_media_file(root) {
             if label.is_none() {
                 label = root.parent().and_then(folder_label);
             }
             if is_readable_media(root) {
                 found.push(root.clone());
+                progress.store(found.len(), Ordering::Relaxed);
             } else {
                 skipped += 1;
+                if needs_transcode(root) {
+                    skipped_transcoded += 1;
+                }
             }
         }
     }
 
+    if cancel.load(Ordering::Relaxed) {
+        return Err(ScanError::Cancelled);
+    }
+
     if !root_exists {
-        return Err("That folder doesn't exist, or it can't be opened.".to_owned());
+        return Err(ScanError::Message(
+            "That folder doesn't exist, or it can't be opened.".to_owned(),
+        ));
     }
 
     let mut seen = HashSet::new();
@@ -81,18 +134,19 @@ pub fn collect_media(roots: &[PathBuf]) -> Result<MediaLibrary, String> {
     media.sort();
 
     if media.is_empty() {
-        return Err(if skipped > 0 {
+        return Err(ScanError::Message(if skipped > 0 {
             "Found some media files, but couldn't read any of them.".to_owned()
         } else {
             "No photos or videos found. Pick a folder with JPG, PNG, HEIC, WebP, or video files."
                 .to_owned()
-        });
+        }));
     }
 
     Ok(MediaLibrary {
         media,
         label: label.unwrap_or_else(|| "Your photos".to_owned()),
         skipped,
+        skipped_transcoded,
     })
 }
 
@@ -109,7 +163,7 @@ pub fn load_photo(path: &Path) -> Result<LoadedPhoto, String> {
 
         #[cfg(not(target_os = "macos"))]
         {
-            return Err("HEIC and AVIF files are only supported on macOS".to_owned());
+            return decode_with_ffmpeg(path);
         }
     }
 
@@ -138,7 +192,7 @@ fn extension_is_in(path: &Path, extensions: &[&str]) -> bool {
         })
 }
 
-/// Formats the image crate can't decode in this build, but macOS ImageIO can.
+/// Formats decoded through macOS ImageIO or ffmpeg instead of the image crate.
 fn needs_transcode(path: &Path) -> bool {
     path.extension()
         .and_then(|extension| extension.to_str())
@@ -156,8 +210,16 @@ fn folder_label(path: &Path) -> Option<String> {
         .map(ToOwned::to_owned)
 }
 
-fn walk(dir: &Path, depth: usize, found: &mut Vec<PathBuf>, skipped: &mut usize) {
-    if depth > MAX_SCAN_DEPTH {
+fn walk(
+    dir: &Path,
+    depth: usize,
+    found: &mut Vec<PathBuf>,
+    skipped: &mut usize,
+    skipped_transcoded: &mut usize,
+    cancel: &AtomicBool,
+    progress: &AtomicUsize,
+) {
+    if depth > MAX_SCAN_DEPTH || cancel.load(Ordering::Relaxed) {
         return;
     }
 
@@ -166,6 +228,9 @@ fn walk(dir: &Path, depth: usize, found: &mut Vec<PathBuf>, skipped: &mut usize)
     };
 
     for entry in entries.flatten() {
+        if cancel.load(Ordering::Relaxed) {
+            return;
+        }
         let name = entry.file_name();
         let name = name.to_string_lossy();
         if name.starts_with('.') {
@@ -185,12 +250,24 @@ fn walk(dir: &Path, depth: usize, found: &mut Vec<PathBuf>, skipped: &mut usize)
             {
                 continue;
             }
-            walk(&path, depth + 1, found, skipped);
+            walk(
+                &path,
+                depth + 1,
+                found,
+                skipped,
+                skipped_transcoded,
+                cancel,
+                progress,
+            );
         } else if file_type.is_file() && is_media_file(&path) {
             if is_readable_media(&path) {
                 found.push(path);
+                progress.store(found.len(), Ordering::Relaxed);
             } else {
                 *skipped += 1;
+                if needs_transcode(&path) {
+                    *skipped_transcoded += 1;
+                }
             }
         }
     }
@@ -201,8 +278,8 @@ fn is_readable_media(path: &Path) -> bool {
         return path.metadata().is_ok_and(|metadata| metadata.len() > 0);
     }
 
-    // HEIC/HEIF and AVIF are decoded through ImageIO/sips on macOS, so the
-    // image crate can't inspect them here. Trust the extension and let the
+    // HEIC/HEIF and AVIF go through ImageIO on macOS or ffmpeg elsewhere, so
+    // the image crate can't inspect them here. Trust the extension and let the
     // loader deal with any errors.
     if needs_transcode(path) {
         #[cfg(target_os = "macos")]
@@ -211,7 +288,8 @@ fn is_readable_media(path: &Path) -> bool {
         }
         #[cfg(not(target_os = "macos"))]
         {
-            return false;
+            return crate::video::is_available()
+                && path.metadata().is_ok_and(|metadata| metadata.len() > 0);
         }
     }
 
@@ -234,20 +312,58 @@ fn decode_image(path: &Path) -> Result<LoadedPhoto, String> {
 
     let mut image = DynamicImage::from_decoder(decoder).map_err(|error| error.to_string())?;
     image.apply_orientation(orientation);
+    finish_image(image)
+}
 
+fn finish_image(image: DynamicImage) -> Result<LoadedPhoto, String> {
     if image.width() == 0 || image.height() == 0 {
         return Err("image has no pixels".to_owned());
     }
 
-    if image.width().max(image.height()) > MAX_TEXTURE_DIMENSION {
-        image = image.thumbnail(MAX_TEXTURE_DIMENSION, MAX_TEXTURE_DIMENSION);
-    }
+    let image = if image.width().max(image.height()) > MAX_TEXTURE_DIMENSION {
+        image.thumbnail(MAX_TEXTURE_DIMENSION, MAX_TEXTURE_DIMENSION)
+    } else {
+        image
+    };
 
     let rgba = image.to_rgba8();
     let size = [rgba.width() as usize, rgba.height() as usize];
     let image = ColorImage::from_rgba_unmultiplied(size, rgba.as_raw());
 
     Ok(LoadedPhoto { image })
+}
+
+#[cfg(not(target_os = "macos"))]
+fn decode_with_ffmpeg(path: &Path) -> Result<LoadedPhoto, String> {
+    use std::process::{Command, Stdio};
+
+    let Some(ffmpeg) = crate::video::find_ffmpeg() else {
+        return Err(
+            "HEIC/AVIF on this platform needs ffmpeg. Install it, then reopen the folder."
+                .to_owned(),
+        );
+    };
+
+    let output = Command::new(ffmpeg)
+        .args(["-v", "error", "-nostdin", "-i"])
+        .arg(path)
+        .args(["-frames:v", "1", "-f", "image2pipe", "-vcodec", "png", "-"])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .output()
+        .map_err(|error| format!("ffmpeg could not start: {error}"))?;
+
+    if !output.status.success() || output.stdout.is_empty() {
+        let message = String::from_utf8_lossy(&output.stderr);
+        return Err(format!(
+            "ffmpeg couldn't decode this photo: {}",
+            message.trim().lines().next().unwrap_or("unknown error")
+        ));
+    }
+
+    let image = image::load_from_memory(&output.stdout)
+        .map_err(|error| format!("ffmpeg output wasn't a readable image: {error}"))?;
+    finish_image(image)
 }
 
 #[cfg(target_os = "macos")]
@@ -285,8 +401,11 @@ fn convert_with_sips(path: &Path) -> Result<PathBuf, String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{collect_media, is_image_file, is_video_file};
+    use super::{
+        ScanError, collect_media, collect_media_interruptible, is_image_file, is_video_file,
+    };
     use std::path::{Path, PathBuf};
+    use std::sync::atomic::{AtomicBool, AtomicUsize};
     use std::time::{SystemTime, UNIX_EPOCH};
 
     #[test]
@@ -343,6 +462,55 @@ mod tests {
         assert_eq!(library.skipped, 1);
         assert!(library.media.iter().any(|path| path.ends_with("two.jpg")));
         assert!(library.media.iter().any(|path| path.ends_with("clip.mp4")));
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn cancellation_stops_a_scan() {
+        let stamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("clock should be sane")
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!(
+            "photo-roulette-cancel-{}-{stamp}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&root).expect("create test folder");
+        let image = image::RgbImage::from_pixel(8, 8, image::Rgb([255, 0, 100]));
+        image.save(root.join("one.png")).expect("save png");
+
+        let cancel = AtomicBool::new(true);
+        let progress = AtomicUsize::new(0);
+        let result = collect_media_interruptible(std::slice::from_ref(&root), &cancel, &progress);
+        assert_eq!(result.unwrap_err(), ScanError::Cancelled);
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn progress_counts_found_media() {
+        let stamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("clock should be sane")
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!(
+            "photo-roulette-progress-{}-{stamp}",
+            std::process::id()
+        ));
+        let nested = root.join("nested");
+        std::fs::create_dir_all(&nested).expect("create test folder");
+        let image = image::RgbImage::from_pixel(8, 8, image::Rgb([0, 200, 100]));
+        image.save(root.join("one.png")).expect("save png");
+        image.save(nested.join("two.png")).expect("save png");
+
+        let cancel = AtomicBool::new(false);
+        let progress = AtomicUsize::new(0);
+        let library = collect_media_interruptible(std::slice::from_ref(&root), &cancel, &progress)
+            .expect("folder should scan");
+
+        assert_eq!(library.media.len(), 2);
+        assert_eq!(progress.load(std::sync::atomic::Ordering::Relaxed), 2);
 
         let _ = std::fs::remove_dir_all(root);
     }

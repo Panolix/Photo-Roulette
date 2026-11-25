@@ -24,7 +24,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Install Linux build dependencies
         if: matrix.os == 'ubuntu-24.04'
@@ -37,15 +37,20 @@ jobs:
             libx11-dev \
             libegl1-mesa-dev \
             libgl1-mesa-dev \
-            libasound2-dev
+            libasound2-dev \
+            ffmpeg
+
+      - name: Install ffmpeg (Windows)
+        if: matrix.os == 'windows-latest'
+        run: choco install ffmpeg --no-progress -y
 
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable
         with:
           components: rustfmt, clippy
 
       - name: Cache Rust
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@2201cc584a476d1b508be977bbe4b7d1c7a52e9c # v2.9.3
 
       - name: Check formatting
         run: cargo fmt --all -- --check
@@ -55,3 +60,25 @@ jobs:
 
       - name: Tests
         run: cargo test --locked
+
+      - name: Build binary
+        run: cargo build --locked
+
+      - name: CLI smoke test
+        shell: bash
+        run: |
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            ./target/debug/photo-roulette.exe --version
+          else
+            ./target/debug/photo-roulette --version
+          fi
+
+  security:
+    name: Dependency audit
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Cargo deny
+        uses: EmbarkStudios/cargo-deny-action@11dff63170bf3644e31564079dcf480e70a2d8d0 # v2

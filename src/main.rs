@@ -1,9 +1,13 @@
 mod deck;
+mod history;
 mod loader;
+mod settings;
 mod theme;
 mod video;
 
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::mpsc::{Receiver, Sender, TryRecvError, channel};
 use std::time::{Duration, Instant};
 
@@ -13,7 +17,9 @@ use eframe::egui::{
 };
 
 use deck::Round;
+use history::History;
 use loader::LoadedPhoto;
+use settings::Settings;
 use theme::{
     ACCENT, ACCENT_HOVER, ACCENT_PRESSED, BG, BORDER, CARD, CARD_BACK, GOOD, INK, MUTED, MUTED_DIM,
     TEXT,
@@ -33,6 +39,13 @@ enum VideoAction {
     CommitScrub(f64),
 }
 
+#[derive(Clone, Copy, Default)]
+struct LoadIntent {
+    counts_as_dealt: bool,
+    record_history: bool,
+    history_pos: Option<usize>,
+}
+
 struct CurrentPhoto {
     texture: egui::TextureHandle,
     path: PathBuf,
@@ -44,6 +57,7 @@ struct PendingLoad {
     generation: u64,
     started: Instant,
     result: Option<Result<LoadedPhoto, String>>,
+    intent: LoadIntent,
 }
 
 struct PendingVideo {
@@ -54,12 +68,12 @@ struct PendingVideo {
     first_frame: Option<egui::ColorImage>,
     error: Option<String>,
     ended: bool,
-    counts_as_dealt: bool,
+    intent: LoadIntent,
     start_offset: f64,
 }
 
 impl PendingVideo {
-    fn start(path: PathBuf, counts_as_dealt: bool, start_offset: f64) -> Result<Self, String> {
+    fn start(path: PathBuf, intent: LoadIntent, start_offset: f64) -> Result<Self, String> {
         let load = video::start(path.clone(), start_offset)?;
         Ok(Self {
             path,
@@ -69,7 +83,7 @@ impl PendingVideo {
             first_frame: None,
             error: None,
             ended: false,
-            counts_as_dealt,
+            intent,
             start_offset,
         })
     }
@@ -210,6 +224,12 @@ impl CurrentVideo {
         }
     }
 
+    fn set_volume(&self, volume: f32) {
+        if let Some(audio) = &self.audio {
+            audio.set_volume(volume);
+        }
+    }
+
     fn stop_audio(&mut self) {
         self.audio = None;
         video::cleanup_audio(&self.audio_path);
@@ -241,6 +261,13 @@ struct Notice {
     until: f64,
 }
 
+struct ScanState {
+    rx: Receiver<Result<loader::MediaLibrary, loader::ScanError>>,
+    cancel: Arc<AtomicBool>,
+    found: Arc<AtomicUsize>,
+    started: Instant,
+}
+
 struct PhotoRoulette {
     library: Vec<PathBuf>,
     folder_label: Option<String>,
@@ -253,13 +280,18 @@ struct PhotoRoulette {
     generation: u64,
     tx: Sender<LoadMessage>,
     rx: Receiver<LoadMessage>,
-    show_filenames: bool,
+    settings: Settings,
+    last_volume: f32,
+    history: History,
+    scan: Option<ScanState>,
+    last_roots: Vec<PathBuf>,
+    show_ffmpeg_dialog: bool,
     notice: Option<Notice>,
     restart_icon: egui::TextureHandle,
 }
 
 impl PhotoRoulette {
-    fn new(cc: &eframe::CreationContext<'_>) -> Self {
+    fn new(cc: &eframe::CreationContext<'_>, initial_folder: Option<PathBuf>) -> Self {
         theme::install(&cc.egui_ctx);
         cc.egui_ctx
             .send_viewport_cmd(egui::ViewportCommand::SetTheme(egui::SystemTheme::Dark));
@@ -279,6 +311,23 @@ impl PhotoRoulette {
             egui::TextureOptions::LINEAR.with_mipmap_mode(Some(egui::TextureFilter::Linear)),
         );
 
+        let settings = Settings::load();
+        if let Some(ffmpeg) = settings.ffmpeg_path.as_ref().filter(|path| path.is_file()) {
+            video::set_custom_ffmpeg(Some(ffmpeg.clone()));
+        }
+        let last_volume = if settings.volume > 0.01 {
+            settings.volume
+        } else {
+            0.85
+        };
+        let startup_folder = initial_folder.or_else(|| {
+            settings
+                .last_folder
+                .as_ref()
+                .filter(|path| path.exists())
+                .cloned()
+        });
+
         let (tx, rx) = channel();
         let mut app = Self {
             library: Vec::new(),
@@ -292,101 +341,196 @@ impl PhotoRoulette {
             generation: 0,
             tx,
             rx,
-            show_filenames: false,
+            settings,
+            last_volume,
+            history: History::default(),
+            scan: None,
+            last_roots: Vec::new(),
+            show_ffmpeg_dialog: false,
             notice: None,
             restart_icon,
         };
 
-        // Bonus: `photo-roulette ~/Pictures/cringe` opens straight into a folder.
-        if let Some(argument) = std::env::args().nth(1)
-            && !argument.starts_with('-')
-        {
-            app.import_roots(vec![PathBuf::from(argument)], &cc.egui_ctx);
+        if let Some(folder) = startup_folder {
+            app.start_scan(vec![folder], &cc.egui_ctx);
         }
 
         app
     }
 
-    fn import_roots(&mut self, roots: Vec<PathBuf>, ctx: &egui::Context) {
+    fn start_scan(&mut self, roots: Vec<PathBuf>, ctx: &egui::Context) {
         if roots.is_empty() {
             return;
         }
 
-        match loader::collect_media(&roots) {
-            Ok(library) => {
-                let mut media = library.media;
-                let skipped_videos = if video::is_available() {
-                    0
-                } else {
-                    let before = media.len();
-                    media.retain(|path| !loader::is_video_file(path));
-                    before - media.len()
-                };
+        if let Some(scan) = self.scan.take() {
+            scan.cancel.store(true, Ordering::Relaxed);
+        }
+        self.pending = None;
+        self.pending_video = None;
+        self.show_ffmpeg_dialog = false;
 
-                if media.is_empty() {
-                    self.notify(
-                        ctx,
-                        NoticeKind::Error,
-                        if skipped_videos > 0 {
-                            "Only videos were found, and video playback needs ffmpeg.".to_owned()
-                        } else {
-                            "No playable media found in that folder.".to_owned()
-                        },
-                    );
-                    return;
-                }
+        let generation = self.generation.wrapping_add(1);
+        self.generation = generation;
+        let cancel = Arc::new(AtomicBool::new(false));
+        let found = Arc::new(AtomicUsize::new(0));
+        let (tx, rx) = channel();
 
-                self.generation = self.generation.wrapping_add(1);
-                self.pending = None;
-                self.pending_video = None;
-                self.current = None;
-                self.current_video = None;
-                self.last_shown = None;
-                self.round = None;
-                self.library = media;
-                self.folder_label = Some(library.label.clone());
-                self.start_round();
+        let thread_roots = roots.clone();
+        let thread_cancel = Arc::clone(&cancel);
+        let thread_found = Arc::clone(&found);
+        let spawn = std::thread::Builder::new()
+            .name("media-scan".to_owned())
+            .spawn(move || {
+                let result = loader::collect_media_interruptible(
+                    &thread_roots,
+                    &thread_cancel,
+                    &thread_found,
+                );
+                let _ = tx.send(result);
+            });
 
-                let images = self
-                    .library
-                    .iter()
-                    .filter(|path| loader::is_image_file(path))
-                    .count();
-                let videos = self
-                    .library
-                    .iter()
-                    .filter(|path| loader::is_video_file(path))
-                    .count();
-                let mut message = match (images, videos) {
-                    (1, 0) => "Loaded 1 photo.".to_owned(),
-                    (1, 1) => "Loaded 1 photo and 1 video.".to_owned(),
-                    (n, 0) => format!("Loaded {n} photos."),
-                    (0, 1) => "Loaded 1 video.".to_owned(),
-                    (0, n) => format!("Loaded {n} videos."),
-                    (n, 1) => format!("Loaded {n} photos and 1 video."),
-                    (n, m) => format!("Loaded {n} photos and {m} videos."),
-                };
-                let skipped = library.skipped + skipped_videos;
-                if skipped > 0 {
-                    message.push_str(&format!(
-                        " Skipped {} unreadable {}.",
-                        skipped,
-                        if skipped == 1 { "file" } else { "files" }
-                    ));
-                }
-                if skipped_videos > 0 {
-                    message.push_str(" Install ffmpeg to play videos.");
-                }
-                self.notify(ctx, NoticeKind::Info, message);
-
-                ctx.send_viewport_cmd(egui::ViewportCommand::Title(format!(
-                    "Photo Roulette — {}",
-                    library.label
-                )));
+        match spawn {
+            Ok(_) => {
+                self.last_roots = roots;
+                self.scan = Some(ScanState {
+                    rx,
+                    cancel,
+                    found,
+                    started: Instant::now(),
+                });
                 ctx.request_repaint();
             }
-            Err(message) => self.notify(ctx, NoticeKind::Error, message),
+            Err(error) => {
+                self.notify(
+                    ctx,
+                    NoticeKind::Error,
+                    format!("Could not start the folder scan: {error}"),
+                );
+            }
         }
+    }
+
+    fn cancel_scan(&mut self, ctx: &egui::Context) {
+        if let Some(scan) = self.scan.take() {
+            scan.cancel.store(true, Ordering::Relaxed);
+            ctx.request_repaint();
+        }
+    }
+
+    fn poll_scan(&mut self, ctx: &egui::Context) {
+        let Some(scan) = self.scan.as_ref() else {
+            return;
+        };
+
+        let result = match scan.rx.try_recv() {
+            Ok(result) => Some(result),
+            Err(TryRecvError::Empty) => None,
+            Err(TryRecvError::Disconnected) => Some(Err(loader::ScanError::Message(
+                "The folder scan stopped unexpectedly.".to_owned(),
+            ))),
+        };
+        let Some(result) = result else {
+            ctx.request_repaint_after(Duration::from_millis(100));
+            return;
+        };
+
+        self.scan = None;
+        match result {
+            Ok(library) => self.apply_library(library, ctx),
+            Err(loader::ScanError::Cancelled) => {}
+            Err(loader::ScanError::Message(message)) => {
+                self.notify(ctx, NoticeKind::Error, message);
+            }
+        }
+        ctx.request_repaint();
+    }
+
+    fn apply_library(&mut self, library: loader::MediaLibrary, ctx: &egui::Context) {
+        let mut media = library.media;
+        let had_videos = media.iter().any(|path| loader::is_video_file(path));
+        let skipped_videos = if video::is_available() {
+            0
+        } else {
+            let before = media.len();
+            media.retain(|path| !loader::is_video_file(path));
+            before - media.len()
+        };
+
+        if media.is_empty() {
+            self.notify(
+                ctx,
+                NoticeKind::Error,
+                if skipped_videos > 0 {
+                    "Only videos were found, and video playback needs ffmpeg.".to_owned()
+                } else {
+                    "No playable media found in that folder.".to_owned()
+                },
+            );
+            if had_videos && skipped_videos > 0 {
+                self.show_ffmpeg_dialog = true;
+            }
+            return;
+        }
+
+        self.pending = None;
+        self.pending_video = None;
+        self.current = None;
+        self.current_video = None;
+        self.last_shown = None;
+        self.round = None;
+        self.history.clear();
+        self.library = media;
+        self.folder_label = Some(library.label.clone());
+        self.start_round();
+
+        let images = self
+            .library
+            .iter()
+            .filter(|path| loader::is_image_file(path))
+            .count();
+        let videos = self
+            .library
+            .iter()
+            .filter(|path| loader::is_video_file(path))
+            .count();
+        let mut message = match (images, videos) {
+            (1, 0) => "Loaded 1 photo.".to_owned(),
+            (1, 1) => "Loaded 1 photo and 1 video.".to_owned(),
+            (n, 0) => format!("Loaded {n} photos."),
+            (0, 1) => "Loaded 1 video.".to_owned(),
+            (0, n) => format!("Loaded {n} videos."),
+            (n, 1) => format!("Loaded {n} photos and 1 video."),
+            (n, m) => format!("Loaded {n} photos and {m} videos."),
+        };
+        let skipped = library.skipped + skipped_videos;
+        if skipped > 0 {
+            message.push_str(&format!(
+                " Skipped {} unreadable {}.",
+                skipped,
+                if skipped == 1 { "file" } else { "files" }
+            ));
+        }
+        if skipped_videos > 0 {
+            message.push_str(" Videos need ffmpeg.");
+            self.show_ffmpeg_dialog = true;
+        }
+        if library.skipped_transcoded > 0 && !video::is_available() {
+            message.push_str(" HEIC/AVIF needs ffmpeg on this platform.");
+            self.show_ffmpeg_dialog = true;
+        }
+        self.notify(ctx, NoticeKind::Info, message);
+
+        if self.last_roots.len() == 1 && self.last_roots[0].is_dir() {
+            self.settings.last_folder = Some(self.last_roots[0].clone());
+            self.settings.save();
+        }
+
+        ctx.send_viewport_cmd(egui::ViewportCommand::Title(format!(
+            "Photo Roulette — {}",
+            library.label
+        )));
+        ctx.request_repaint();
     }
 
     fn open_import(&mut self, ctx: &egui::Context) {
@@ -395,7 +539,7 @@ impl PhotoRoulette {
             .pick_folder();
 
         if let Some(folder) = picked {
-            self.import_roots(vec![folder], ctx);
+            self.start_scan(vec![folder], ctx);
         }
     }
 
@@ -416,7 +560,7 @@ impl PhotoRoulette {
     }
 
     fn deal(&mut self, ctx: &egui::Context) {
-        if self.pending.is_some() || self.pending_video.is_some() {
+        if self.scan.is_some() || self.pending.is_some() || self.pending_video.is_some() {
             return;
         }
 
@@ -435,11 +579,41 @@ impl PhotoRoulette {
             return;
         };
 
+        let intent = LoadIntent {
+            counts_as_dealt: true,
+            record_history: true,
+            history_pos: None,
+        };
+        self.load_path(path, intent, 0.0, ctx);
+    }
+
+    fn previous(&mut self, ctx: &egui::Context) {
+        if self.scan.is_some() || self.pending.is_some() || self.pending_video.is_some() {
+            return;
+        }
+        let Some((pos, path)) = self.history.previous() else {
+            return;
+        };
+        let intent = LoadIntent {
+            counts_as_dealt: false,
+            record_history: false,
+            history_pos: Some(pos),
+        };
+        self.load_path(path, intent, 0.0, ctx);
+    }
+
+    fn load_path(
+        &mut self,
+        path: PathBuf,
+        intent: LoadIntent,
+        start_offset: f64,
+        ctx: &egui::Context,
+    ) {
         self.current = None;
         self.current_video = None;
 
         if loader::is_video_file(&path) {
-            match PendingVideo::start(path.clone(), true, 0.0) {
+            match PendingVideo::start(path.clone(), intent, start_offset) {
                 Ok(pending) => self.pending_video = Some(pending),
                 Err(error) => {
                     self.handle_media_failure(path, error, ctx);
@@ -452,6 +626,7 @@ impl PhotoRoulette {
                 generation: self.generation,
                 started: Instant::now(),
                 result: None,
+                intent,
             });
 
             let tx = self.tx.clone();
@@ -487,6 +662,7 @@ impl PhotoRoulette {
         eprintln!("Photo Roulette: could not open {}: {error}", path.display());
 
         self.library.retain(|media| media != &path);
+        self.history.remove(&path);
         if let Some(round) = self.round.as_mut() {
             round.mark_unreadable();
         }
@@ -494,6 +670,7 @@ impl PhotoRoulette {
         if self.library.is_empty() {
             self.round = None;
             self.folder_label = None;
+            self.history.clear();
             self.notify(
                 ctx,
                 NoticeKind::Error,
@@ -532,6 +709,7 @@ impl PhotoRoulette {
 
         let pending = self.pending.take().expect("pending load was just checked");
         let result = pending.result.expect("load result was just checked");
+        let intent = pending.intent;
 
         match result {
             Ok(loaded) => {
@@ -547,15 +725,25 @@ impl PhotoRoulette {
                     path: pending.path.clone(),
                     revealed_at: Instant::now(),
                 });
+                self.apply_load_intent(&pending.path, intent);
                 self.last_shown = Some(pending.path);
-
-                if let Some(round) = self.round.as_mut() {
-                    round.mark_dealt();
-                }
 
                 ctx.request_repaint();
             }
             Err(error) => self.handle_media_failure(pending.path, error, ctx),
+        }
+    }
+
+    fn apply_load_intent(&mut self, path: &Path, intent: LoadIntent) {
+        if intent.record_history {
+            self.history.record(path.to_path_buf());
+        } else if let Some(pos) = intent.history_pos {
+            self.history.set_pos(pos);
+        }
+        if intent.counts_as_dealt
+            && let Some(round) = self.round.as_mut()
+        {
+            round.mark_dealt();
         }
     }
 
@@ -594,7 +782,8 @@ impl PhotoRoulette {
         }
 
         let ready = pending.info.is_some() && pending.first_frame.is_some();
-        let suspense_done = !pending.counts_as_dealt || pending.started.elapsed() >= MIN_SUSPENSE;
+        let suspense_done =
+            !pending.intent.counts_as_dealt || pending.started.elapsed() >= MIN_SUSPENSE;
         if pending.error.is_none() && (!ready || !suspense_done) {
             ctx.request_repaint_after(Duration::from_millis(33));
             return;
@@ -604,16 +793,16 @@ impl PhotoRoulette {
             .pending_video
             .take()
             .expect("pending video was just checked");
-        let counts_as_dealt = pending.counts_as_dealt;
+        let intent = pending.intent;
         if let Some(error) = pending.error.take() {
-            if counts_as_dealt {
+            if intent.counts_as_dealt {
                 self.handle_media_failure(pending.path.clone(), error, ctx);
             } else {
-                eprintln!("Photo Roulette: video replay failed: {error}");
+                eprintln!("Photo Roulette: video load failed: {error}");
                 self.notify(
                     ctx,
                     NoticeKind::Error,
-                    "Couldn't replay this video.".to_owned(),
+                    "Couldn't open this video.".to_owned(),
                 );
             }
             return;
@@ -624,7 +813,7 @@ impl PhotoRoulette {
             pending.first_frame.take(),
             pending.rx.take(),
         ) else {
-            if counts_as_dealt {
+            if intent.counts_as_dealt {
                 self.handle_media_failure(
                     pending.path.clone(),
                     "the video decoder returned no frames".to_owned(),
@@ -634,7 +823,7 @@ impl PhotoRoulette {
                 self.notify(
                     ctx,
                     NoticeKind::Error,
-                    "Couldn't replay this video.".to_owned(),
+                    "Couldn't open this video.".to_owned(),
                 );
             }
             return;
@@ -647,7 +836,9 @@ impl PhotoRoulette {
         );
         let now = Instant::now();
         let audio_path = info.audio_path.take();
-        let audio = audio_path.as_deref().and_then(video::play_audio);
+        let audio = audio_path
+            .as_deref()
+            .and_then(|path| video::play_audio(path, self.settings.volume));
 
         self.current_video = Some(CurrentVideo {
             texture,
@@ -665,11 +856,8 @@ impl PhotoRoulette {
             audio,
             audio_path,
         });
+        self.apply_load_intent(&pending.path, intent);
         self.last_shown = Some(pending.path.clone());
-
-        if counts_as_dealt && let Some(round) = self.round.as_mut() {
-            round.mark_dealt();
-        }
 
         ctx.request_repaint();
     }
@@ -682,7 +870,7 @@ impl PhotoRoulette {
             return;
         };
 
-        match PendingVideo::start(path, false, 0.0) {
+        match PendingVideo::start(path, LoadIntent::default(), 0.0) {
             Ok(pending) => {
                 if let Some(video) = self.current_video.as_mut() {
                     video.pause();
@@ -714,7 +902,7 @@ impl PhotoRoulette {
             None => target.max(0.0),
         };
 
-        match PendingVideo::start(path, false, target) {
+        match PendingVideo::start(path, LoadIntent::default(), target) {
             Ok(pending) => {
                 if let Some(video) = self.current_video.as_mut() {
                     video.pause();
@@ -776,7 +964,7 @@ impl PhotoRoulette {
                 .collect()
         });
         if !dropped.is_empty() {
-            self.import_roots(dropped, ctx);
+            self.start_scan(dropped, ctx);
         }
 
         let focused = ctx.memory(|memory| memory.focused().is_some());
@@ -784,6 +972,8 @@ impl PhotoRoulette {
             space,
             replay_key,
             pause_key,
+            previous_key,
+            mute_key,
             seek_left,
             seek_right,
             fullscreen_key,
@@ -794,6 +984,8 @@ impl PhotoRoulette {
                 input.key_pressed(egui::Key::Space) && input.modifiers.is_none(),
                 input.key_pressed(egui::Key::R) && input.modifiers.is_none(),
                 input.key_pressed(egui::Key::P) && input.modifiers.is_none(),
+                input.key_pressed(egui::Key::Backspace) && input.modifiers.is_none(),
+                input.key_pressed(egui::Key::M) && input.modifiers.is_none(),
                 input.key_pressed(egui::Key::ArrowLeft) && input.modifiers.is_none(),
                 input.key_pressed(egui::Key::ArrowRight) && input.modifiers.is_none(),
                 input.key_pressed(egui::Key::F) && input.modifiers.is_none(),
@@ -819,6 +1011,14 @@ impl PhotoRoulette {
             ctx.request_repaint();
         }
 
+        if mute_key {
+            self.toggle_mute();
+        }
+
+        if previous_key && !focused {
+            self.previous(ctx);
+        }
+
         if (seek_left || seek_right)
             && self.pending.is_none()
             && self.pending_video.is_none()
@@ -829,19 +1029,41 @@ impl PhotoRoulette {
             self.seek_video(ctx, video.elapsed() + delta);
         }
 
-        if space && !focused && !self.library.is_empty() {
+        if space && !focused && !self.library.is_empty() && self.scan.is_none() {
             self.deal(ctx);
+        }
+    }
+
+    fn toggle_mute(&mut self) {
+        if self.settings.volume > 0.001 {
+            self.last_volume = self.settings.volume;
+            self.settings.volume = 0.0;
+        } else {
+            self.settings.volume = self.last_volume.clamp(0.05, 1.0);
+        }
+        self.apply_volume();
+        self.settings.save();
+    }
+
+    fn apply_volume(&mut self) {
+        self.settings.volume = self.settings.volume.clamp(0.0, 1.0);
+        if self.settings.volume > 0.001 {
+            self.last_volume = self.settings.volume;
+        }
+        if let Some(video) = &self.current_video {
+            video.set_volume(self.settings.volume);
         }
     }
 
     fn top_bar(&mut self, ctx: &egui::Context) {
         egui::TopBottomPanel::top("top-bar")
             .resizable(false)
+            .show_separator_line(false)
             .frame(egui::Frame::NONE.fill(BG).inner_margin(Margin {
                 left: 30,
                 right: 30,
-                top: 24,
-                bottom: 12,
+                top: 18,
+                bottom: 10,
             }))
             .show(ctx, |ui| {
                 ui.horizontal(|ui| {
@@ -851,22 +1073,31 @@ impl PhotoRoulette {
                             ui.spacing_mut().item_spacing.x = 0.0;
                             ui.label(
                                 RichText::new("PHOTO ")
-                                    .font(theme::display_font(34.0))
+                                    .font(theme::display_font(30.0))
                                     .color(TEXT)
                                     .extra_letter_spacing(0.6),
                             );
                             ui.label(
                                 RichText::new("ROULETTE")
-                                    .font(theme::display_font(34.0))
+                                    .font(theme::display_font(30.0))
                                     .color(ACCENT)
                                     .extra_letter_spacing(0.6),
                             );
                         });
-                        ui.label(
-                            RichText::new("Deal the evidence. Photos and videos, one at a time.")
-                                .font(theme::body_font(13.5))
+                        ui.horizontal(|ui| {
+                            ui.label(
+                                RichText::new(
+                                    "Deal the evidence. Photos and videos, one at a time.",
+                                )
+                                .font(theme::body_font(13.0))
                                 .color(MUTED),
-                        );
+                            );
+                            ui.label(
+                                RichText::new(format!("v{}", env!("CARGO_PKG_VERSION")))
+                                    .font(theme::bold_font(9.0))
+                                    .color(MUTED_DIM),
+                            );
+                        });
                     });
 
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
@@ -888,6 +1119,7 @@ impl PhotoRoulette {
     fn bottom_bar(&mut self, ctx: &egui::Context) {
         egui::TopBottomPanel::bottom("bottom-bar")
             .resizable(false)
+            .show_separator_line(false)
             .frame(egui::Frame::NONE.fill(BG).inner_margin(Margin {
                 left: 30,
                 right: 30,
@@ -899,13 +1131,27 @@ impl PhotoRoulette {
                 ui.add_space(10.0);
 
                 ui.vertical_centered(|ui| {
-                    let enabled = self.pending.is_none() && self.pending_video.is_none();
+                    let enabled = self.scan.is_none()
+                        && self.pending.is_none()
+                        && self.pending_video.is_none();
+                    let can_go_back = self.history.can_go_back();
                     let label = self.primary_label();
-                    let response = primary_button(ui, label, vec2(430.0, 56.0), enabled);
-                    if response.clicked() {
-                        response.surrender_focus();
-                        self.deal(ctx);
-                    }
+                    ui.horizontal(|ui| {
+                        let row_width = 104.0 + ui.spacing().item_spacing.x + 400.0;
+                        ui.add_space(((ui.available_width() - row_width) * 0.5).max(0.0));
+                        let back = ui.add_enabled_ui(can_go_back, |ui| {
+                            secondary_button(ui, "‹ BACK", vec2(104.0, 56.0))
+                        });
+                        if back.inner.clicked() {
+                            back.inner.surrender_focus();
+                            self.previous(ctx);
+                        }
+                        let response = primary_button(ui, label, vec2(400.0, 56.0), enabled);
+                        if response.clicked() {
+                            response.surrender_focus();
+                            self.deal(ctx);
+                        }
+                    });
 
                     ui.add_space(6.0);
                     ui.label(
@@ -979,6 +1225,34 @@ impl PhotoRoulette {
                 ui.add_space(8.0);
 
                 ui.scope(|ui| {
+                    ui.spacing_mut().slider_width = 84.0;
+                    ui.spacing_mut().interact_size.y = 18.0;
+                    ui.spacing_mut().slider_rail_height = 4.0;
+                    let mut volume = self.settings.volume;
+                    let slider = ui.add(
+                        egui::Slider::new(&mut volume, 0.0..=1.0)
+                            .show_value(false)
+                            .trailing_fill(true),
+                    );
+                    if slider.changed() {
+                        self.settings.volume = volume;
+                        self.apply_volume();
+                    }
+                    if slider.drag_stopped() || slider.clicked() || slider.lost_focus() {
+                        self.settings.save();
+                    }
+                    slider.on_hover_text("Volume (M to mute)");
+                    ui.label(
+                        RichText::new("VOL")
+                            .font(theme::bold_font(10.0))
+                            .color(MUTED)
+                            .extra_letter_spacing(1.0),
+                    );
+                });
+
+                ui.add_space(8.0);
+
+                ui.scope(|ui| {
                     let widgets = &mut ui.style_mut().visuals.widgets;
                     for widget in [
                         &mut widgets.inactive,
@@ -988,7 +1262,7 @@ impl PhotoRoulette {
                         widget.corner_radius = CornerRadius::same(4);
                     }
                     let response = ui.checkbox(
-                        &mut self.show_filenames,
+                        &mut self.settings.show_filenames,
                         RichText::new("SHOW FILE NAMES")
                             .font(theme::bold_font(10.0))
                             .color(MUTED)
@@ -996,6 +1270,7 @@ impl PhotoRoulette {
                     );
                     if response.clicked() {
                         response.surrender_focus();
+                        self.settings.save();
                     }
                 });
             });
@@ -1003,7 +1278,10 @@ impl PhotoRoulette {
     }
 
     fn primary_label(&self) -> &'static str {
-        if self.pending.is_some() || (self.pending_video.is_some() && self.current_video.is_none())
+        if self.scan.is_some() {
+            "SCANNING…"
+        } else if self.pending.is_some()
+            || (self.pending_video.is_some() && self.current_video.is_none())
         {
             "SHUFFLING…"
         } else if self.library.is_empty() {
@@ -1018,7 +1296,9 @@ impl PhotoRoulette {
     }
 
     fn hint_text(&self) -> &'static str {
-        if self.pending.is_some() {
+        if self.scan.is_some() {
+            "LOOKING THROUGH THE FOLDER…"
+        } else if self.pending.is_some() {
             "PICK A CARD, ANY CARD"
         } else if self.pending_video.is_some() {
             if self.current_video.is_some() {
@@ -1030,9 +1310,9 @@ impl PhotoRoulette {
             "DROP A FOLDER ANYWHERE · PHOTOS + VIDEOS"
         } else if let Some(video) = &self.current_video {
             if video.is_paused() {
-                "CLICK VIDEO TO PLAY · DRAG TO SEEK · R TO RESTART · SPACE NEXT"
+                "CLICK VIDEO TO PLAY · DRAG TO SEEK · M MUTE · R RESTART · SPACE NEXT"
             } else {
-                "CLICK VIDEO TO PAUSE · DRAG TO SEEK · R TO RESTART · SPACE NEXT"
+                "CLICK VIDEO TO PAUSE · DRAG TO SEEK · M MUTE · R RESTART · SPACE NEXT"
             }
         } else if self.round.as_ref().is_some_and(Round::is_complete) {
             "EVERY ITEM GOT ITS MOMENT · NEW ROUND = FRESH SHUFFLE"
@@ -1046,8 +1326,8 @@ impl PhotoRoulette {
             .frame(egui::Frame::NONE.fill(BG).inner_margin(Margin {
                 left: 30,
                 right: 30,
-                top: 0,
-                bottom: 2,
+                top: 10,
+                bottom: 10,
             }))
             .show(ctx, |ui| {
                 let (card, _) = ui.allocate_exact_size(ui.available_size(), Sense::hover());
@@ -1066,7 +1346,30 @@ impl PhotoRoulette {
                 theme::corner_marks(&painter, card);
 
                 let buffering = self.pending_video.is_some() && self.current_video.is_some();
-                if self.pending.is_some() || (self.pending_video.is_some() && !buffering) {
+                if let Some(scan) = &self.scan {
+                    let time = ctx.input(|input| input.time) as f32;
+                    let found = scan.found.load(Ordering::Relaxed);
+                    let elapsed = scan.started.elapsed().as_secs_f32();
+                    draw_scanning(&painter, card, found, elapsed, time);
+                    let cancel_rect = egui::Rect::from_center_size(
+                        pos2(card.center().x, card.center().y + 228.0),
+                        vec2(150.0, 38.0),
+                    );
+                    let cancel = ui.put(
+                        cancel_rect,
+                        egui::Button::new(
+                            RichText::new("CANCEL")
+                                .font(theme::bold_font(10.5))
+                                .extra_letter_spacing(1.0),
+                        )
+                        .fill(CARD_BACK)
+                        .stroke(Stroke::new(1.0_f32, BORDER)),
+                    );
+                    if cancel.clicked() {
+                        cancel.surrender_focus();
+                        self.cancel_scan(ctx);
+                    }
+                } else if self.pending.is_some() || (self.pending_video.is_some() && !buffering) {
                     let time = ctx.input(|input| input.time) as f32;
                     draw_loading(&painter, card, time, self.pending_video.is_some());
                 } else if let Some(video) = &self.current_video {
@@ -1075,7 +1378,7 @@ impl PhotoRoulette {
                         &painter,
                         card,
                         video,
-                        self.show_filenames,
+                        self.settings.show_filenames,
                         buffering,
                         &self.restart_icon,
                     );
@@ -1106,7 +1409,14 @@ impl PhotoRoulette {
                         }
                     }
                 } else if let Some(current) = &self.current {
-                    draw_photo(ui, &painter, card, current, self.show_filenames, ctx);
+                    draw_photo(
+                        ui,
+                        &painter,
+                        card,
+                        current,
+                        self.settings.show_filenames,
+                        ctx,
+                    );
                 } else {
                     draw_empty(
                         &painter,
@@ -1119,6 +1429,80 @@ impl PhotoRoulette {
 
                 self.draw_notice(&painter, card, ctx);
             });
+    }
+
+    fn ffmpeg_dialog(&mut self, ctx: &egui::Context) {
+        if !self.show_ffmpeg_dialog {
+            return;
+        }
+
+        let mut open = true;
+        let mut close = false;
+        egui::Window::new("VIDEO NEEDS FFMPEG")
+            .open(&mut open)
+            .collapsible(false)
+            .resizable(false)
+            .anchor(Align2::CENTER_CENTER, vec2(0.0, 0.0))
+            .show(ctx, |ui| {
+                ui.set_max_width(440.0);
+                ui.add_space(4.0);
+                ui.label(
+                    RichText::new("Videos are decoded by ffmpeg. Photos already work without it.")
+                        .font(theme::body_font(13.0))
+                        .color(TEXT),
+                );
+                ui.add_space(8.0);
+                ui.label(
+                    RichText::new(video::install_hint())
+                        .font(theme::body_font(12.0))
+                        .color(MUTED),
+                );
+                ui.add_space(14.0);
+
+                ui.horizontal(|ui| {
+                    if secondary_button(ui, "LOCATE FFMPEG…", vec2(190.0, 38.0)).clicked() {
+                        let picked = rfd::FileDialog::new()
+                            .set_title("Choose the ffmpeg executable")
+                            .pick_file();
+                        if let Some(path) = picked {
+                            if video::validate_ffmpeg(&path) {
+                                video::set_custom_ffmpeg(Some(path.clone()));
+                                self.settings.ffmpeg_path = Some(path);
+                                self.settings.save();
+                                self.show_ffmpeg_dialog = false;
+                                close = true;
+                                let roots = self.last_roots.clone();
+                                if !roots.is_empty() {
+                                    self.start_scan(roots, ctx);
+                                }
+                            } else {
+                                self.notify(
+                                    ctx,
+                                    NoticeKind::Error,
+                                    "That file doesn't look like a working ffmpeg executable."
+                                        .to_owned(),
+                                );
+                            }
+                        }
+                    }
+
+                    ui.hyperlink_to(
+                        RichText::new("DOWNLOAD FFMPEG")
+                            .font(theme::bold_font(10.5))
+                            .color(ACCENT),
+                        "https://ffmpeg.org/download.html",
+                    );
+                });
+
+                ui.add_space(8.0);
+                if text_button(ui, "NOT NOW").clicked() {
+                    close = true;
+                }
+            });
+
+        if close || !open {
+            self.show_ffmpeg_dialog = false;
+        }
     }
 
     fn draw_notice(&mut self, painter: &egui::Painter, card: egui::Rect, ctx: &egui::Context) {
@@ -1223,6 +1607,7 @@ impl PhotoRoulette {
 
 impl eframe::App for PhotoRoulette {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        self.poll_scan(ctx);
         self.poll_image_load(ctx);
         self.poll_video_load(ctx);
         self.update_current_video(ctx);
@@ -1232,6 +1617,7 @@ impl eframe::App for PhotoRoulette {
         self.bottom_bar(ctx);
         self.stage(ctx);
         self.drop_overlay(ctx);
+        self.ffmpeg_dialog(ctx);
     }
 }
 
@@ -1317,7 +1703,7 @@ fn secondary_button(ui: &mut egui::Ui, label: &str, size: Vec2) -> egui::Respons
         ui.add(
             egui::Button::new(
                 RichText::new(label)
-                    .font(theme::bold_font(10.5))
+                    .font(theme::bold_font(11.5))
                     .extra_letter_spacing(1.2),
             )
             .min_size(size),
@@ -1854,6 +2240,51 @@ fn draw_empty(
     painter.galley(pill_rect.min + vec2(10.0, 5.0), galley, pill_color);
 }
 
+fn draw_scanning(painter: &egui::Painter, card: egui::Rect, found: usize, elapsed: f32, time: f32) {
+    let center = card.center() - vec2(0.0, 16.0);
+    draw_shuffle_wheel(painter, center, 140.0, time);
+
+    let bob = (time * 2.2).sin() * 3.0;
+    let stack_center = center + vec2(0.0, bob);
+    stack_cards(
+        painter,
+        stack_center,
+        Color32::from_rgb(30, 30, 41),
+        Color32::from_rgba_unmultiplied(ACCENT.r(), ACCENT.g(), ACCENT.b(), 110),
+    );
+    painter.text(
+        stack_center,
+        Align2::CENTER_CENTER,
+        "?",
+        theme::display_font(62.0),
+        ACCENT,
+    );
+
+    let dots = ".".repeat(1 + (time * 2.5) as usize % 3);
+    painter.text(
+        pos2(card.center().x, card.center().y + 166.0),
+        Align2::CENTER_CENTER,
+        format!("SCANNING THE EVIDENCE{dots}"),
+        theme::bold_font(11.0),
+        ACCENT,
+    );
+    painter.text(
+        pos2(card.center().x, card.center().y + 188.0),
+        Align2::CENTER_CENTER,
+        if found == 0 {
+            format!("Looking through subfolders… {:.0}s", elapsed)
+        } else {
+            format!(
+                "{found} {} found · {:.0}s",
+                if found == 1 { "file" } else { "files" },
+                elapsed
+            )
+        },
+        theme::body_font(11.0),
+        MUTED,
+    );
+}
+
 fn draw_loading(painter: &egui::Painter, card: egui::Rect, time: f32, is_video: bool) {
     let center = card.center() - vec2(0.0, 16.0);
     draw_shuffle_wheel(painter, center, 140.0, time);
@@ -2043,6 +2474,26 @@ fn app_icon() -> egui::IconData {
 }
 
 fn main() -> eframe::Result {
+    let mut initial_folder = None;
+    for argument in std::env::args().skip(1) {
+        match argument.as_str() {
+            "-h" | "--help" => {
+                print_help();
+                return Ok(());
+            }
+            "-V" | "--version" => {
+                println!("photo-roulette {}", env!("CARGO_PKG_VERSION"));
+                return Ok(());
+            }
+            value if value.starts_with('-') => {
+                eprintln!("Unknown option: {value}\n");
+                print_help();
+                std::process::exit(2);
+            }
+            value => initial_folder = Some(PathBuf::from(value)),
+        }
+    }
+
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_inner_size([1000.0, 780.0])
@@ -2054,6 +2505,29 @@ fn main() -> eframe::Result {
     eframe::run_native(
         "Photo Roulette",
         options,
-        Box::new(|cc| Ok(Box::new(PhotoRoulette::new(cc)))),
+        Box::new(move |cc| Ok(Box::new(PhotoRoulette::new(cc, initial_folder)))),
     )
+}
+
+fn print_help() {
+    println!(
+        "Photo Roulette {version}\n\
+         Deal photos and videos one at a time, with no repeats in a round.\n\n\
+         USAGE:\n\
+         \x20   photo-roulette [FOLDER]\n\n\
+         OPTIONS:\n\
+         \x20   -h, --help       Show this help\n\
+         \x20   -V, --version    Show the version\n\n\
+         CONTROLS:\n\
+         \x20   Space             Deal the next item\n\
+         \x20   Backspace         Go back to the previous item\n\
+         \x20   Click video       Pause / play\n\
+         \x20   Drag timeline     Seek\n\
+         \x20   Left / Right      Seek 5 seconds\n\
+         \x20   R                 Restart the current video\n\
+         \x20   M                 Mute / unmute\n\
+         \x20   F                 Toggle fullscreen\n\n\
+         Video playback needs ffmpeg. Photos work without it.",
+        version = env!("CARGO_PKG_VERSION")
+    );
 }

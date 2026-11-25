@@ -1,6 +1,6 @@
 #define MyAppName "Photo Roulette"
 #ifndef MyAppVersion
-  #define MyAppVersion "0.3.0"
+  #define MyAppVersion "0.4.0"
 #endif
 #define MyAppPublisher "Panagiotis Smponias"
 #define MyAppURL "https://github.com/Panolix/Photo-Roulette"
@@ -42,6 +42,17 @@ Name: "desktopicon"; Description: "Create a desktop shortcut"; GroupDescription:
 [Files]
 Source: "{#ProjectRoot}\target\release\{#MyAppExeName}"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#ProjectRoot}\assets\PhotoRoulette.ico"; DestDir: "{app}"; Flags: ignoreversion
+
+; Optional bundled ffmpeg. Put ffmpeg.exe / ffprobe.exe in packaging\windows\ffmpeg.
+#if FileExists(AddBackslash(SourcePath) + "ffmpeg\ffmpeg.exe")
+Source: "{#ProjectRoot}\packaging\windows\ffmpeg\ffmpeg.exe"; DestDir: "{app}"; Flags: ignoreversion
+#endif
+#if FileExists(AddBackslash(SourcePath) + "ffmpeg\ffprobe.exe")
+Source: "{#ProjectRoot}\packaging\windows\ffmpeg\ffprobe.exe"; DestDir: "{app}"; Flags: ignoreversion
+#endif
+#if FileExists(AddBackslash(SourcePath) + "ffmpeg\LICENSE")
+Source: "{#ProjectRoot}\packaging\windows\ffmpeg\LICENSE"; DestDir: "{app}\licenses"; DestName: "FFMPEG-LICENSE.txt"; Flags: ignoreversion
+#endif
 Source: "{#ProjectRoot}\README.md"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#ProjectRoot}\LICENSE"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#ProjectRoot}\COMMERCIAL.md"; DestDir: "{app}"; Flags: ignoreversion
@@ -49,6 +60,7 @@ Source: "{#ProjectRoot}\NOTICE"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#ProjectRoot}\CLA.md"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#ProjectRoot}\assets\fonts\OFL-ArchivoBlack.txt"; DestDir: "{app}\licenses"; Flags: ignoreversion
 Source: "{#ProjectRoot}\assets\fonts\OFL-SpaceGrotesk.txt"; DestDir: "{app}\licenses"; Flags: ignoreversion
+Source: "{#ProjectRoot}\assets\icons\LICENSE-bootstrap-icons.txt"; DestDir: "{app}\licenses"; Flags: ignoreversion
 
 [Icons]
 Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; IconFilename: "{app}\PhotoRoulette.ico"

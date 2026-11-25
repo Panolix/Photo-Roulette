@@ -26,6 +26,19 @@ mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 
 cp target/release/photo-roulette "$APP/Contents/MacOS/photo-roulette"
 cp assets/PhotoRoulette.icns "$APP/Contents/Resources/PhotoRoulette.icns"
+
+# Optional: bundle an LGPL ffmpeg next to the executable. See
+# packaging/ffmpeg/README.md before shipping a build this way.
+if [ -n "${FFMPEG_BIN_DIR:-}" ]; then
+    for binary in ffmpeg ffprobe; do
+        if [ -f "$FFMPEG_BIN_DIR/$binary" ]; then
+            install -m 755 "$FFMPEG_BIN_DIR/$binary" "$APP/Contents/MacOS/$binary"
+        fi
+    done
+    if [ -f "$FFMPEG_BIN_DIR/LICENSE" ]; then
+        cp "$FFMPEG_BIN_DIR/LICENSE" "$APP/Contents/Resources/licenses/FFMPEG-LICENSE.txt"
+    fi
+fi
 mkdir -p "$APP/Contents/Resources/licenses"
 cp assets/fonts/OFL-ArchivoBlack.txt "$APP/Contents/Resources/licenses/"
 cp assets/fonts/OFL-SpaceGrotesk.txt "$APP/Contents/Resources/licenses/"

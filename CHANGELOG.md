@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.4.0 — 2026-11-25
+
+- Folder scanning now runs in the background with a live file count and a cancel button.
+- Volume slider, `M` mute shortcut, and persisted volume.
+- Back navigation: the `‹ BACK` button or `Backspace` returns to the previous item.
+- Settings are remembered across launches: last folder, volume, filename overlay, and window geometry.
+- Video is capped at 1920 px and small videos are no longer upscaled.
+- Audio is extracted as compact AAC/M4A with a WAV fallback, so long videos no longer create giant temp files.
+- A setup dialog can locate ffmpeg, remembers its path, and explains platform-specific install commands.
+- HEIC/AVIF photos can be decoded through ffmpeg on Windows and Linux.
+- Optional ffmpeg bundling hooks for all three platform packages.
+- `--help` and `--version` CLI flags.
+- Trimmed unused image features, removing an AVIF encoder dependency chain from the build.
+- 17 tests, including a generated-video pipeline test, scan cancellation/progress, history, and settings.
+- CI now runs `cargo deny`, a CLI smoke test, and package-content checks; releases publish SHA-256 checksums.
+- Restart control redrawn with a clearer circular-arrow icon; pointer cursor over the player; app icon glow contained.
+- Typography and spacing pass: smaller wordmark, consistent label sizes, compact volume control, and equal breathing room above and below the canvas.
+- Removed the full-width panel separator lines so the rounded canvas border is the only divider.
+
 ## 0.3.0 — 2026-11-25
 
 - Cross-platform video audio using `rodio` (macOS, Windows, Linux).

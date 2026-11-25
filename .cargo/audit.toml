@@ -1,0 +1,9 @@
+[advisories]
+# These are in the Linux accessibility stack pulled in by eframe/accesskit
+# (quick-xml 0.30 via zbus_xml). They require malicious local AT-SPI XML and
+# are not reachable from the app's media paths. Revisit when eframe updates
+# accesskit, or when accesskit ships a newer zbus_xml.
+ignore = [
+    "RUSTSEC-2026-0194",
+    "RUSTSEC-2026-0195",
+]
