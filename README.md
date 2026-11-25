@@ -66,10 +66,9 @@ and in `PATH`. It supports the formats ffmpeg can decode, including **MP4, MOV,
 M4V, WMV, AVI, MKV, and WebM**. Videos are decoded to a maximum of 1280 px at
 30 fps.
 
-Video **audio playback is currently macOS-only** (native `AVAudioPlayer`).
-Windows and Linux builds play video frames when ffmpeg is available, but without
-sound. If ffmpeg is missing, videos are skipped and the app stays in photo-only
-mode.
+Video playback, including sound, works on macOS, Windows, and Linux when
+ffmpeg is available. If ffmpeg is missing, videos are skipped and the app stays
+in photo-only mode.
 
 ## Controls
 
@@ -103,8 +102,8 @@ Platform build requirements:
 
 - **macOS:** Xcode Command Line Tools.
 - **Windows:** Microsoft C++ Build Tools.
-- **Linux:** the usual GTK/OpenGL/X11/Wayland development packages used by
-  `eframe`/`winit`, plus `pkg-config`.
+- **Linux:** the usual OpenGL/X11/Wayland development packages used by
+  `eframe`/`winit`, plus `pkg-config` and `libasound2-dev` for audio.
 
 The release build is recommended; debug builds decode photos and video at debug
 speed.
@@ -160,7 +159,6 @@ Remove duplicates before the party if you don't want them to appear twice.
 ## Known limitations
 
 - macOS app builds are ad-hoc signed and not notarized.
-- Windows/Linux video playback is silent for now.
 - Video controls support play/pause, seek, and restart, but not volume, speed,
   or subtitle controls.
 - No RAW/PSD support.

@@ -87,7 +87,8 @@ jobs:
             libwayland-dev \
             libx11-dev \
             libegl1-mesa-dev \
-            libgl1-mesa-dev
+            libgl1-mesa-dev \
+            libasound2-dev
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable

@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.3.0 — 2026-11-25
+
+- Cross-platform video audio using `rodio` (macOS, Windows, Linux).
+- ffmpeg remains the video decoder and is still installed separately.
+- Seeking and in-place buffering keep the current video frame visible instead of reloading the stage.
+- Play/pause icon centered and reduced in size; draggable timeline added.
+
 ## 0.2.0 — 2026-11-25
 
 The first public release.

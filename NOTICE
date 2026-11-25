@@ -67,6 +67,8 @@ affiliation with the original author.
   Open Font License. Their license texts are in `assets/fonts/`.
 - **ffmpeg** is not distributed with this project. When installed separately,
   it remains under its own license (the Homebrew build is GPL-licensed).
+- **rodio** and its audio backends are distributed under MIT/Apache-2.0
+  licenses; see `Cargo.lock` for the exact versions.
 - Other Rust dependencies retain their respective licenses; run
   `cargo license` or inspect `Cargo.lock` for the dependency set.
 

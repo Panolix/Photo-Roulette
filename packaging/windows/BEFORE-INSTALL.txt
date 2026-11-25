@@ -7,6 +7,3 @@ For video playback, install ffmpeg separately and make sure it is on your PATH:
     winget install Gyan.FFmpeg
 
 You can also put ffmpeg.exe and ffprobe.exe next to photo-roulette.exe.
-
-Video audio is currently available in the macOS build only. The Windows build
-plays video frames without sound.

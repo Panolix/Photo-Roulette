@@ -38,7 +38,7 @@ Priority: optional
 Architecture: ${DEB_ARCH}
 Maintainer: Panagiotis Smponias <info@cityframe-photography.com>
 Homepage: https://github.com/Panolix/Photo-Roulette
-Depends: libc6, libgl1, libx11-6, libxkbcommon0, libwayland-client0, libegl1
+Depends: libc6, libgl1, libx11-6, libxkbcommon0, libwayland-client0, libegl1, libasound2
 Recommends: ffmpeg
 Description: A tiny photo and video roulette for group cringe sessions
  Import a folder of photos and videos, then deal one random item at a time.

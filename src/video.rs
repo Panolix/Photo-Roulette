@@ -1,37 +1,26 @@
 //! Video preparation and frame streaming.
 //!
 //! Frames are decoded by the system `ffmpeg` binary and streamed as RGBA
-//! images into egui. On macOS, audio is extracted to a temporary WAV and played
-//! with `AVAudioPlayer`, which gives clean pause/resume/seek behavior. Windows
-//! and Linux currently play video frames without audio.
+//! images into egui. Audio is extracted to a temporary WAV and played with
+//! `rodio`, giving clean pause/resume/seek behavior on macOS, Windows and Linux.
 //!
 //! This supports the formats ffmpeg can decode (MOV, MP4, WMV, AVI, MKV, WebM, …).
 
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
-#[cfg(target_os = "macos")]
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::{Receiver, SyncSender, sync_channel};
 use std::thread;
 
 use eframe::egui::ColorImage;
 use image::ImageReader;
-
-#[cfg(target_os = "macos")]
-use objc2::AnyThread;
-#[cfg(target_os = "macos")]
-use objc2::rc::Retained;
-#[cfg(target_os = "macos")]
-use objc2_avf_audio::AVAudioPlayer;
-#[cfg(target_os = "macos")]
-use objc2_foundation::{NSString, NSURL};
+use rodio::{Decoder, DeviceSinkBuilder, MixerDeviceSink, Player};
 
 const FPS: u32 = 30;
 const MAX_DIMENSION: u32 = 1280;
 const FRAME_CHANNEL_CAPACITY: usize = 6;
 
-#[cfg(target_os = "macos")]
 static TEMP_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 #[derive(Clone, Debug)]
@@ -52,32 +41,24 @@ pub struct VideoLoad {
 }
 
 pub struct AudioPlayer {
-    #[cfg(target_os = "macos")]
-    player: Retained<AVAudioPlayer>,
+    // Keep the output stream alive for as long as the player exists.
+    _stream: MixerDeviceSink,
+    player: Player,
 }
 
 impl AudioPlayer {
     pub fn pause(&self) {
-        #[cfg(target_os = "macos")]
-        unsafe {
-            self.player.pause();
-        }
+        self.player.pause();
     }
 
     pub fn resume(&self) {
-        #[cfg(target_os = "macos")]
-        unsafe {
-            self.player.play();
-        }
+        self.player.play();
     }
 }
 
 impl Drop for AudioPlayer {
     fn drop(&mut self) {
-        #[cfg(target_os = "macos")]
-        unsafe {
-            self.player.stop();
-        }
+        self.player.stop();
     }
 }
 
@@ -271,48 +252,39 @@ fn extract_poster(
 }
 
 fn extract_audio(ffmpeg: &Path, path: &Path, start_offset: f64) -> Option<PathBuf> {
-    #[cfg(not(target_os = "macos"))]
-    {
-        let _ = (ffmpeg, path, start_offset);
-        None
+    let output = temp_file("wav");
+    let mut command = Command::new(ffmpeg);
+    command.args(["-v", "error", "-nostdin"]);
+    if start_offset > 0.0 {
+        command.arg("-ss").arg(format!("{start_offset:.3}"));
     }
+    let result = command
+        .arg("-i")
+        .arg(path)
+        .args([
+            "-map",
+            "0:a:0?",
+            "-vn",
+            "-ac",
+            "2",
+            "-ar",
+            "44100",
+            "-c:a",
+            "pcm_s16le",
+            "-y",
+        ])
+        .arg(&output)
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status();
 
-    #[cfg(target_os = "macos")]
-    {
-        let output = temp_file("wav");
-        let mut command = Command::new(ffmpeg);
-        command.args(["-v", "error", "-nostdin"]);
-        if start_offset > 0.0 {
-            command.arg("-ss").arg(format!("{start_offset:.3}"));
-        }
-        let result = command
-            .arg("-i")
-            .arg(path)
-            .args([
-                "-map",
-                "0:a:0?",
-                "-vn",
-                "-ac",
-                "2",
-                "-ar",
-                "44100",
-                "-c:a",
-                "pcm_s16le",
-                "-y",
-            ])
-            .arg(&output)
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .status();
-
-        let ok = result.is_ok_and(|status| status.success())
-            && output.metadata().is_ok_and(|metadata| metadata.len() > 44);
-        if ok {
-            Some(output)
-        } else {
-            let _ = fs::remove_file(output);
-            None
-        }
+    let ok = result.is_ok_and(|status| status.success())
+        && output.metadata().is_ok_and(|metadata| metadata.len() > 44);
+    if ok {
+        Some(output)
+    } else {
+        let _ = fs::remove_file(output);
+        None
     }
 }
 
@@ -359,30 +331,36 @@ fn read_frame(stdout: &mut impl std::io::Read, buffer: &mut [u8]) -> Result<bool
 }
 
 pub fn play_audio(path: &Path) -> Option<AudioPlayer> {
-    #[cfg(target_os = "macos")]
-    {
-        let url = NSURL::fileURLWithPath(&NSString::from_str(&path.to_string_lossy()));
-        let player = unsafe {
-            match AVAudioPlayer::initWithContentsOfURL_error(AVAudioPlayer::alloc(), &url) {
-                Ok(player) => player,
-                Err(error) => {
-                    eprintln!("Photo Roulette: audio init failed: {error:?}");
-                    return None;
-                }
-            }
-        };
-        unsafe {
-            player.prepareToPlay();
-            player.play();
+    let stream = match DeviceSinkBuilder::open_default_sink() {
+        Ok(stream) => stream,
+        Err(error) => {
+            eprintln!("Photo Roulette: audio output unavailable: {error}");
+            return None;
         }
-        Some(AudioPlayer { player })
-    }
+    };
+    let player = Player::connect_new(stream.mixer());
 
-    #[cfg(not(target_os = "macos"))]
-    {
-        let _ = path;
-        None
-    }
+    let file = match fs::File::open(path) {
+        Ok(file) => file,
+        Err(error) => {
+            eprintln!("Photo Roulette: could not open audio: {error}");
+            return None;
+        }
+    };
+    let source = match Decoder::try_from(file) {
+        Ok(source) => source,
+        Err(error) => {
+            eprintln!("Photo Roulette: could not decode audio: {error}");
+            return None;
+        }
+    };
+
+    player.append(source);
+    player.play();
+    Some(AudioPlayer {
+        _stream: stream,
+        player,
+    })
 }
 
 pub fn cleanup_audio(path: &Option<PathBuf>) {
@@ -396,7 +374,6 @@ fn stop_child(child: &mut Child) {
     let _ = child.wait();
 }
 
-#[cfg(target_os = "macos")]
 fn temp_file(extension: &str) -> PathBuf {
     let unique = TEMP_COUNTER.fetch_add(1, Ordering::Relaxed);
     std::env::temp_dir().join(format!(
