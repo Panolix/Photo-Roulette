@@ -28,6 +28,7 @@ install -m 644 assets/PhotoRoulette-256.png \
 install -m 644 README.md LICENSE COMMERCIAL.md NOTICE CLA.md \
   "$DEB_ROOT/usr/share/doc/photo-roulette/"
 install -m 644 assets/fonts/OFL-ArchivoBlack.txt assets/fonts/OFL-SpaceGrotesk.txt \
+  assets/icons/LICENSE-bootstrap-icons.txt \
   "$DEB_ROOT/usr/share/doc/photo-roulette/"
 
 cat > "$DEB_ROOT/DEBIAN/control" <<EOF
@@ -42,8 +43,8 @@ Depends: libc6, libgl1, libx11-6, libxkbcommon0, libwayland-client0, libegl1, li
 Recommends: ffmpeg
 Description: A tiny photo and video roulette for group cringe sessions
  Import a folder of photos and videos, then deal one random item at a time.
- Every item is shown once per round. Video playback needs ffmpeg; video audio
- is currently available on macOS only.
+ Every item is shown once per round. Video playback needs ffmpeg; audio is
+ handled by rodio on macOS, Windows and Linux.
 EOF
 
 chmod 755 "$DEB_ROOT/usr/bin/photo-roulette"
@@ -55,7 +56,8 @@ cp "$BIN" "$PORTABLE/photo-roulette"
 cp README.md LICENSE COMMERCIAL.md NOTICE CLA.md "$PORTABLE/"
 cp packaging/linux/photo-roulette.desktop "$PORTABLE/"
 cp assets/PhotoRoulette-256.png "$PORTABLE/photo-roulette.png"
-cp assets/fonts/OFL-ArchivoBlack.txt assets/fonts/OFL-SpaceGrotesk.txt "$PORTABLE/"
+cp assets/fonts/OFL-ArchivoBlack.txt assets/fonts/OFL-SpaceGrotesk.txt \
+  assets/icons/LICENSE-bootstrap-icons.txt "$PORTABLE/"
 tar -czf "$TARBALL" -C "$(dirname "$PORTABLE")" "$(basename "$PORTABLE")"
 
 echo "Built:"
