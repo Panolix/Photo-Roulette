@@ -255,6 +255,7 @@ struct PhotoRoulette {
     rx: Receiver<LoadMessage>,
     show_filenames: bool,
     notice: Option<Notice>,
+    restart_icon: egui::TextureHandle,
 }
 
 impl PhotoRoulette {
@@ -262,6 +263,21 @@ impl PhotoRoulette {
         theme::install(&cc.egui_ctx);
         cc.egui_ctx
             .send_viewport_cmd(egui::ViewportCommand::SetTheme(egui::SystemTheme::Dark));
+
+        let restart_image = image::load_from_memory(include_bytes!("../assets/icons/restart.png"))
+            .expect("the bundled restart icon should be valid")
+            .to_rgba8();
+        let restart_icon = cc.egui_ctx.load_texture(
+            "restart-icon",
+            egui::ColorImage::from_rgba_unmultiplied(
+                [
+                    restart_image.width() as usize,
+                    restart_image.height() as usize,
+                ],
+                restart_image.as_raw(),
+            ),
+            egui::TextureOptions::LINEAR.with_mipmap_mode(Some(egui::TextureFilter::Linear)),
+        );
 
         let (tx, rx) = channel();
         let mut app = Self {
@@ -278,6 +294,7 @@ impl PhotoRoulette {
             rx,
             show_filenames: false,
             notice: None,
+            restart_icon,
         };
 
         // Bonus: `photo-roulette ~/Pictures/cringe` opens straight into a folder.
@@ -1060,7 +1077,7 @@ impl PhotoRoulette {
                         video,
                         self.show_filenames,
                         buffering,
-                        ctx,
+                        &self.restart_icon,
                     );
                     if let Some(action) = action {
                         match action {
@@ -1423,7 +1440,7 @@ fn draw_video(
     video: &CurrentVideo,
     show_filename: bool,
     buffering: bool,
-    ctx: &egui::Context,
+    restart_icon: &egui::TextureHandle,
 ) -> Option<VideoAction> {
     let elapsed = video.started_at.elapsed().as_secs_f32();
     let reveal = (elapsed / REVEAL_SECONDS).clamp(0.0, 1.0);
@@ -1544,9 +1561,7 @@ fn draw_video(
     };
 
     let video_response = ui.interact(rect, ui.id().with("video-toggle"), Sense::click());
-    if timeline_hovered || video.scrubbing {
-        ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeHorizontal);
-    } else if video_response.hovered() || restart_hovered {
+    if timeline_hovered || video.scrubbing || video_response.hovered() || restart_hovered {
         ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
     }
 
@@ -1670,28 +1685,17 @@ fn draw_video(
         painter.galley(chip.min + vec2(10.0, 5.0), galley, TEXT);
     }
 
-    // Restart button.
-    painter.circle_filled(
-        restart_rect.center(),
-        17.0,
-        Color32::from_rgba_unmultiplied(8, 8, 12, if restart_hovered { 220 } else { 145 }),
-    );
-    painter.circle_stroke(
-        restart_rect.center(),
-        17.0,
-        Stroke::new(
-            1.0_f32,
-            if restart_hovered {
-                ACCENT
-            } else {
-                Color32::from_white_alpha(30)
-            },
-        ),
-    );
-    draw_restart_icon(
-        painter,
-        restart_rect.center(),
-        7.5,
+    // Restart button. No outer ring: the circular arrow is the whole icon.
+    let restart_bg = if restart_hovered {
+        Color32::from_rgba_unmultiplied(8, 8, 12, 220)
+    } else {
+        Color32::from_rgba_unmultiplied(8, 8, 12, 130)
+    };
+    painter.circle_filled(restart_rect.center(), 17.0, restart_bg);
+    painter.image(
+        restart_icon.id(),
+        egui::Rect::from_center_size(restart_rect.center(), vec2(22.0, 22.0)),
+        egui::Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)),
         if restart_hovered { ACCENT_HOVER } else { TEXT },
     );
 
@@ -1701,7 +1705,12 @@ fn draw_video(
         painter.circle_filled(overlay.center(), 28.0, Color32::from_black_alpha(145));
 
         if video.ended {
-            draw_restart_icon(painter, overlay.center(), 10.0, TEXT);
+            painter.image(
+                restart_icon.id(),
+                egui::Rect::from_center_size(overlay.center(), vec2(30.0, 30.0)),
+                egui::Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)),
+                TEXT,
+            );
         } else if video.is_paused() {
             painter.add(egui::Shape::convex_polygon(
                 vec![
@@ -1741,7 +1750,7 @@ fn draw_video(
     }
 
     if reveal < 1.0 {
-        ctx.request_repaint();
+        ui.ctx().request_repaint();
     }
 
     action
@@ -1757,32 +1766,6 @@ fn format_duration(seconds: f64) -> String {
     } else {
         format!("{minutes}:{secs:02}")
     }
-}
-
-fn draw_restart_icon(painter: &egui::Painter, center: egui::Pos2, radius: f32, color: Color32) {
-    let start = -0.65;
-    let end = start + TAU * 0.82;
-    let segments = 24;
-    let points: Vec<egui::Pos2> = (0..=segments)
-        .map(|index| {
-            let angle = start + (end - start) * index as f32 / segments as f32;
-            center + vec2(angle.cos(), angle.sin()) * radius
-        })
-        .collect();
-    painter.add(egui::Shape::line(points, Stroke::new(1.65_f32, color)));
-
-    let tip = center + vec2(end.cos(), end.sin()) * (radius + 2.5);
-    let tangent = vec2(-end.sin(), end.cos());
-    let radial = vec2(end.cos(), end.sin());
-    painter.add(egui::Shape::convex_polygon(
-        vec![
-            tip,
-            tip - tangent * 4.0 + radial * 1.8,
-            tip - tangent * 4.0 - radial * 1.8,
-        ],
-        color,
-        Stroke::NONE,
-    ));
 }
 
 fn draw_empty(

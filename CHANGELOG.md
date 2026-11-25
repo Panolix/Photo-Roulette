@@ -6,6 +6,8 @@
 - ffmpeg remains the video decoder and is still installed separately.
 - Seeking and in-place buffering keep the current video frame visible instead of reloading the stage.
 - Play/pause icon centered and reduced in size; draggable timeline added.
+- Restart control redrawn with a clear circular-arrow icon and no competing outer ring.
+- App icon cleaned up so no glow bleeds outside the rounded square.
 
 ## 0.2.0 — 2026-11-25
 

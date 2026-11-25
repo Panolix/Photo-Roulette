@@ -65,6 +65,8 @@ affiliation with the original author.
 
 - **Archivo Black** and **Space Grotesk** fonts are distributed under the SIL
   Open Font License. Their license texts are in `assets/fonts/`.
+- The **Bootstrap Icons** restart glyph is distributed under the MIT License;
+  its license text is in `assets/icons/`.
 - **ffmpeg** is not distributed with this project. When installed separately,
   it remains under its own license (the Homebrew build is GPL-licensed).
 - **rodio** and its audio backends are distributed under MIT/Apache-2.0
