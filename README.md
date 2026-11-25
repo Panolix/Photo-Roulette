@@ -1,5 +1,9 @@
 # Photo Roulette
 
+<p align="center">
+  <img src="assets/PhotoRoulette-256.png" width="128" alt="Photo Roulette icon">
+</p>
+
 [![Platform](https://img.shields.io/badge/Platform-macOS%20%7C%20Windows%20%7C%20Linux-blue)](https://github.com/Panolix/Photo-Roulette/releases)
 [![License: CC BY-NC-SA 4.0](https://img.shields.io/badge/License-CC_BY--NC--SA_4.0-blue.svg)](https://creativecommons.org/licenses/by-nc-sa/4.0/)
 [![Built with Rust + egui](https://img.shields.io/badge/Built%20with-Rust%20%2B%20egui-orange)](https://github.com/emilk/egui)
