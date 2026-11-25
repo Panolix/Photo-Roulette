@@ -12,7 +12,11 @@ TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 
 curl -fsSL "$URL" -o "$TMP/ffmpeg.tar.xz"
-printf '%s  %s\n' "$SHA256" "$TMP/ffmpeg.tar.xz" | shasum -a 256 -c -
+if command -v sha256sum >/dev/null 2>&1; then
+    printf '%s  %s\n' "$SHA256" "$TMP/ffmpeg.tar.xz" | sha256sum -c -
+else
+    printf '%s  %s\n' "$SHA256" "$TMP/ffmpeg.tar.xz" | shasum -a 256 -c -
+fi
 tar -xJf "$TMP/ffmpeg.tar.xz" -C "$TMP"
 
 ROOT="$(find "$TMP" -maxdepth 1 -type d -name 'ffmpeg-*' | head -n 1)"
